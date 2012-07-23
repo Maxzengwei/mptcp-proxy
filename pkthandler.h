@@ -96,14 +96,23 @@ struct tc_ctl {
 
 
 struct mp_capable {
+
+//	unsigned	a:2;
+//	unsigned	b:2;
+//	unsigned	c:2;
+//	unsigned	d:2;
 	uint8_t		kind;
 	uint8_t		length;
+#if _BYTE_ORDER == __LITTLE_ENDIAN
 	unsigned 	subtype:4;
 	unsigned 	version:4;
-	unsigned  	c:1;
-	unsigned	reserved:6;
-	unsigned	s:1;	
-	unsigned char	sender_key[8];
+#elif _BYTE_ORDER == __BIG_ENDIAN
+	unsigned 	version:4;
+	unsigned 	subtype:4;
+#endif
+//	uint8_t		reserved:8;
+	unsigned long long 	sender_key;	
+//	unsigned char	sender_key[8];
 //	uint64_t  	sender_key; //TODO 1:64 bits  2:Option recever's key
 };
 
