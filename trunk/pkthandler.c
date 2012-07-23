@@ -463,7 +463,7 @@ int handle_packet(void *packet, int len, int flags)
 			{
 				int mptcp_option_len = *cp;
 				cp--; /* back to first byte */
-				struct mp_capable* mp = (struct mpcapable*)cp;
+				struct mp_capable* mp = (struct mp_capable*)cp;
 /* success 		 	mp->kind = 2; */
 //		mp->sender_key = 0x0102030405060708ll;
 //				long long t = 0x0102030405060708;
@@ -473,12 +473,34 @@ int handle_packet(void *packet, int len, int flags)
 //			mp->subtype = 2;
 //			mp->c=0x2;
 //			printf("a %x b %x c %x d %x\n",mp->a,mp->b,mp->c,mp->d);
-			//printf("KIND %x LENGTH %x SUBTYPE %x version %x Flag %x \n",mp->kind,mp->length,mp->subtype,mp->version, mp->reserved);
+			printf("KIND %x LENGTH %x SUBTYPE %x version %x Flag %x \n",mp->kind,mp->length,mp->subtype,mp->version, mp->reserved);
 		
-			printf("KEY3 %llx\n",mp->sender_key);
-			printf("KEY2 %llx\n",ntohl(mp->sender_key));	
+/*			
+			unsigned char* buffer;
+			buffer=malloc(sizeof(mptcp_option_len));
+
+			memcpy(buffer,cp,mptcp_option_len);
+
+			printf("BUFFER: %u\n",buffer[0]);
+			printf("BUFFER: %u\n",buffer[1]);
+			printf("BUFFER: %u\n",buffer[2]);
+			printf("BUFFER: %x\n",buffer[3]);
+			printf("BUFFER: %x\n",buffer[4]);
+			printf("BUFFER: %x\n",buffer[5]);
+			printf("BUFFER: %x\n",buffer[6]);
+			printf("BUFFER: %x\n",buffer[7]);
+			printf("BUFFER: %x\n",buffer[8]);
+			printf("BUFFER: %x\n",buffer[9]);
+			printf("BUFFER: %x\n",buffer[10]);
+			printf("BUFFER: %x\n",buffer[11]);
+			printf("BUFFER: %llx\n",buffer[4]);
+*/	
+			int i;
+			for( i=0;i<=7;i++){
+				printf("KEY3 %x\n",mp->sender_key[i]);
+			}	
 			 
-			printf("KEY3 %lld\n",mp->sender_key); 	
+			//printf("KEY3 %lld\n",mp->sender_key); 	
 				option_len++;
 				while(--mptcp_option_len>=0){
 					printf("%02x ",*cp++);

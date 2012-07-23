@@ -103,16 +103,16 @@ struct mp_capable {
 //	unsigned	d:2;
 	uint8_t		kind;
 	uint8_t		length;
-#if _BYTE_ORDER == __LITTLE_ENDIAN
-	unsigned 	subtype:4;
-	unsigned 	version:4;
-#elif _BYTE_ORDER == __BIG_ENDIAN
-	unsigned 	version:4;
-	unsigned 	subtype:4;
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char 	version:4;
+#elif __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	version:4;
+	unsigned char	subtype:4;
 #endif
-//	uint8_t		reserved:8;
-	unsigned long long 	sender_key;	
-//	unsigned char	sender_key[8];
+	uint8_t		reserved:8;
+//	long long 	sender_key;	
+	unsigned char	sender_key[8];
 //	uint64_t  	sender_key; //TODO 1:64 bits  2:Option recever's key
 };
 
