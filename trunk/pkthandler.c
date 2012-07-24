@@ -437,9 +437,33 @@ int handle_packet(void *packet, int len, int flags)
 	if (ip->ip_p != IPPROTO_TCP)
 		return DIVERT_ACCEPT;
        
+	tcp = (struct tcphdr*) ((unsigned long) ip + (ip->ip_hl << 2));	
 
-	tcp = (struct tcphdr*) ((unsigned long) ip + (ip->ip_hl << 2));
-	
+	if ((unsigned long) tcp - (unsigned long) ip + (tcp->doff << 2) > len)
+		{
+                    
+			xprintf(XP_ALWAYS, "Bad packet\n");
+			return DIVERT_ACCEPT; /* kernel will drop / deal with it */
+
+		}
+        tc = lookup_connection(ip, tcp, flags);
+        /* new connection */
+	if (!tc) {
+		/*if (tcp->th_flags != TH_SYN) {
+			xprintf(XP_NOISY, "Ignoring established connection: ");
+			print_packet(ip, tcp, flags);
+
+			return DIVERT_ACCEPT;
+		}*/
+
+		tc = new_connection(ip, tcp, flags);
+		
+	}
+		
+        tc->tc_dir_packet = (flags & DF_IN) ? DIR_IN : DIR_OUT;
+	tc->tc_csum       = 0;
+
+
 
  	int option_len = (tcp->doff-5) << 2;
 	
@@ -462,45 +486,28 @@ int handle_packet(void *packet, int len, int flags)
 			case TCPOPT_MPTCP: /* MPTCP TYPE */
 			{
 				int mptcp_option_len = *cp;
+				char* buffer;
 				cp--; /* back to first byte */
-				struct mp_capable* mp = (struct mp_capable*)cp;
-/* success 		 	mp->kind = 2; */
-//		mp->sender_key = 0x0102030405060708ll;
-//				long long t = 0x0102030405060708;
-//				
+				buffer = malloc(mptcp_option_len);
 
-/*TODO sender_key display incorrectly */
-//			mp->subtype = 2;
-//			mp->c=0x2;
-//			printf("a %x b %x c %x d %x\n",mp->a,mp->b,mp->c,mp->d);
-			printf("KIND %x LENGTH %x SUBTYPE %x version %x Flag %x \n",mp->kind,mp->length,mp->subtype,mp->version, mp->reserved);
+
+struct mp_join_24* m = (struct mp_join_24*) cp;
+m->subtype = 9; 
+
+				memcpy(buffer,cp,mptcp_option_len);
+				int subtype = buffer[2]>>4;
+				printf("mp_len %d Subtype %d\n",mptcp_option_len,subtype);
+				
+				
+			//	struct mp_capable* mp = (struct mp_capable*)cp;	
+
+//			printf("KIND %x LENGTH %x SUBTYPE %x version %x Flag %x \n",mp->kind,mp->length,mp->subtype,mp->version, mp->reserved);
 		
-/*			
-			unsigned char* buffer;
-			buffer=malloc(sizeof(mptcp_option_len));
-
-			memcpy(buffer,cp,mptcp_option_len);
-
-			printf("BUFFER: %u\n",buffer[0]);
-			printf("BUFFER: %u\n",buffer[1]);
-			printf("BUFFER: %u\n",buffer[2]);
-			printf("BUFFER: %x\n",buffer[3]);
-			printf("BUFFER: %x\n",buffer[4]);
-			printf("BUFFER: %x\n",buffer[5]);
-			printf("BUFFER: %x\n",buffer[6]);
-			printf("BUFFER: %x\n",buffer[7]);
-			printf("BUFFER: %x\n",buffer[8]);
-			printf("BUFFER: %x\n",buffer[9]);
-			printf("BUFFER: %x\n",buffer[10]);
-			printf("BUFFER: %x\n",buffer[11]);
-			printf("BUFFER: %llx\n",buffer[4]);
-*/	
-			int i;
-			for( i=0;i<=7;i++){
-				printf("KEY3 %x\n",mp->sender_key[i]);
-			}	
-			 
-			//printf("KEY3 %lld\n",mp->sender_key); 	
+/*			int i;*/
+/*			for( i=0;i<=7;i++){*/
+/*				printf("KEY3 %x\n",mp->sender_key[i]);*/
+/*			}	*/
+			 	
 				option_len++;
 				while(--mptcp_option_len>=0){
 					printf("%02x ",*cp++);
@@ -520,7 +527,6 @@ int handle_packet(void *packet, int len, int flags)
 //					*cp = 0x01;
 					*cp++;
 					option_len--;
-//					printf(" len %d\n",option_len);
 				}
 				break;
 
@@ -536,7 +542,6 @@ int handle_packet(void *packet, int len, int flags)
 //					*cp = 0x01;
 					*cp++;
 					option_len--;
-//					printf(" len %d\n",option_len);
 				}
 				break;
 
@@ -560,35 +565,7 @@ int handle_packet(void *packet, int len, int flags)
 
 	
 
-	if ((unsigned long) tcp - (unsigned long) ip + (tcp->doff << 2) > len)
-		{
-                    
-			xprintf(XP_ALWAYS, "Bad packet\n");
-			return DIVERT_ACCEPT; /* kernel will drop / deal with it */
-
-
-		}
-        tc = lookup_connection(ip, tcp, flags);
-        /* new connection */
-	if (!tc) {
-		
-
-
-
-		/*if (tcp->th_flags != TH_SYN) {
-			xprintf(XP_NOISY, "Ignoring established connection: ");
-			print_packet(ip, tcp, flags);
-
-			return DIVERT_ACCEPT;
-		}*/
-
-		tc = new_connection(ip, tcp, flags);
-		
-	}
-		
-        tc->tc_dir_packet = (flags & DF_IN) ? DIR_IN : DIR_OUT;
-	tc->tc_csum       = 0;
-
+	
 
         
         

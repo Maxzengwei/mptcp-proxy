@@ -96,32 +96,31 @@ struct tc_ctl {
 
 
 struct mp_capable {
-
-//	unsigned	a:2;
-//	unsigned	b:2;
-//	unsigned	c:2;
-//	unsigned	d:2;
 	uint8_t		kind;
 	uint8_t		length;
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if __BYTE_ORDER == __BIG_ENDIAN
 	unsigned char	subtype:4;
 	unsigned char 	version:4;
-#elif __BYTE_ORDER == __BIG_ENDIAN
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
 	unsigned char	version:4;
 	unsigned char	subtype:4;
 #endif
 	uint8_t		reserved:8;
-//	long long 	sender_key;	
 	unsigned char	sender_key[8];
-//	uint64_t  	sender_key; //TODO 1:64 bits  2:Option recever's key
 };
 
 struct mp_join_12{
 	uint8_t		kind;
 	uint8_t 	length;
-	unsigned	subtype:4;
-	unsigned	reserved:3;
-	unsigned	b:1;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	reserved:3;
+	unsigned char	b:1;
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	b:1;
+	unsigned char	reserved:3;
+	unsigned char	subtype:4;
+#endif
 	uint8_t		address;
 	uint32_t	receiver_token;
 	uint32_t	sender_number;
@@ -130,9 +129,15 @@ struct mp_join_12{
 struct mp_join_16{
 	uint8_t		kind;
 	uint8_t 	length;
-	unsigned	subtype:4;
-	unsigned	reserved:3;
-	unsigned	b:1;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	reserved:3;
+	unsigned char	b:1;
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	b:1;
+	unsigned char	reserved:3;
+	unsigned char	subtype:4;
+#endif
 	uint8_t		address;
 	uint64_t	sender_mac;
 	uint32_t	sender_number;
@@ -141,19 +146,128 @@ struct mp_join_16{
 struct mp_join_24{
 	uint8_t		kind;
 	uint8_t 	length;
-	unsigned	subtype:4;
-	unsigned	reserved:6;
-	unsigned char 	sendr_mac_sha[20]; //TODO ?
+#if __BYTE_ORDER == __BIG_ENDIAN	
+	unsigned char	subtype:4;
+	unsigned char	reserved1:4;
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+ 	unsigned char	reserved1:4;
+	unsigned char	subtype:4;
+#endif
+	unsigned char	reserved2:8;
+	unsigned char 	sendr_mac_sha[20]; 
 };
 
-struct mp_dss{
+struct mp_dss_44{
 	uint8_t		kind;
 	uint8_t		length;
-	unsigned	subtype:4;
-	unsigned	reserved:7;
-	unsigned	flags:5;	//TODO 4:4:8:8
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	reserved1:4;
+	unsigned char 	reserved2:3;
+	unsigned char	F:1;	
+	unsigned char	m:1;	
+	unsigned char	M:1;
+	unsigned char	a:1;
+	unsigned char	A:1;	
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	reserved1:4;
+	unsigned char	subtype:4;
+	unsigned char	A:1;
+	unsigned char	a:1;
+	unsigned char	M:1;
+	unsigned char	m:1;
+	unsigned char	F:1;
+	unsigned char	reserved:3;
+#endif
+	uint32_t	data_ack;
+	uint32_t	data_seq;
+	uint32_t	sub_seq;
+	uint16_t	data_level_length;
+	uint16_t	checksum;
+};
+
+struct mp_dss_88{
+	uint8_t		kind;
+	uint8_t		length;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	reserved1:4;
+	unsigned char 	reserved2:3;
+	unsigned char	F:1;	
+	unsigned char	m:1;	
+	unsigned char	M:1;
+	unsigned char	a:1;
+	unsigned char	A:1;	
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	reserved1:4;
+	unsigned char	subtype:4;
+	unsigned char	A:1;
+	unsigned char	a:1;
+	unsigned char	M:1;
+	unsigned char	m:1;
+	unsigned char	F:1;
+	unsigned char	reserved:3;
+#endif
 	uint64_t	data_ack;
 	uint64_t	data_seq;
+	uint32_t	sub_seq;
+	uint16_t	data_level_length;
+	uint16_t	checksum;
+};
+
+struct mp_dss_48{
+	uint8_t		kind;
+	uint8_t		length;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	reserved1:4;
+	unsigned char 	reserved2:3;
+	unsigned char	F:1;	
+	unsigned char	m:1;	
+	unsigned char	M:1;
+	unsigned char	a:1;
+	unsigned char	A:1;	
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	reserved1:4;
+	unsigned char	subtype:4;
+	unsigned char	A:1;
+	unsigned char	a:1;
+	unsigned char	M:1;
+	unsigned char	m:1;
+	unsigned char	F:1;
+	unsigned char	reserved:3;
+#endif
+	uint32_t	data_ack;
+	uint64_t	data_seq;
+	uint32_t	sub_seq;
+	uint16_t	data_level_length;
+	uint16_t	checksum;
+};
+
+struct mp_dss_84{
+	uint8_t		kind;
+	uint8_t		length;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	reserved1:4;
+	unsigned char 	reserved2:3;
+	unsigned char	F:1;	
+	unsigned char	m:1;	
+	unsigned char	M:1;
+	unsigned char	a:1;
+	unsigned char	A:1;	
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	reserved1:4;
+	unsigned char	subtype:4;
+	unsigned char	A:1;
+	unsigned char	a:1;
+	unsigned char	M:1;
+	unsigned char	m:1;
+	unsigned char	F:1;
+	unsigned char	reserved:3;
+#endif
+	uint64_t	data_ack;
+	uint32_t	data_seq;
 	uint32_t	sub_seq;
 	uint16_t	data_level_length;
 	uint16_t	checksum;
@@ -162,19 +276,42 @@ struct mp_dss{
 struct mp_add_addr_4{
 	uint8_t 	kind;
 	uint8_t		length;
-	unsigned	subtype:4;
-	unsigned 	ipver:4;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	ipver:4;
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	ipver:4;
+	unsigned char	subtype:4;	
+#endif
 	uint8_t		address;
-	uint32_t	ipv4; //TODO IPv6 port
+	uint32_t	ipv4; 
 };
 
 struct mp_add_addr_6{
 	uint8_t 	kind;
 	uint8_t		length;
-	unsigned	subtype:4;
-	unsigned 	ipver:4;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	ipver:4;
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	ipver:4;
+	unsigned char	subtype:4;
+#endif	
 	uint8_t		address;
-	unsigned char	ipv6[16]; //TODO IPv6 port
+	unsigned char	ipv6[16]; 
+};
+
+struct mp_remove_addr{
+	uint8_t		kind;
+	uint8_t		length;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char 	reserved:4;
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	reserved:4;
+	unsigned char	subtype:4;
+#endif
+	uint8_t 	id; //TODO check number of bits
 };
 
 
