@@ -416,6 +416,16 @@ int print_option(void *packet, int len)
 	printf("\n");
 }
 
+int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+	char *cp = p;
+	int mptcp_option_len = 12;
+				while(--mptcp_option_len>=0){
+					printf("%02x ",*cp++);				
+					printf("CP len %d\n",mptcp_option_len);
+				}
+
+}
+
 int handle_packet(void *packet, int len, int flags)
 {
 
@@ -488,26 +498,23 @@ int handle_packet(void *packet, int len, int flags)
 				int mptcp_option_len = *cp;
 				char* buffer;
 				cp--; /* back to first byte */
+
+				void *p = cp;
+				printf("Pointer : %d\n",p);
 				buffer = malloc(mptcp_option_len);
 
 
-struct mp_join_24* m = (struct mp_join_24*) cp;
-m->subtype = 9; 
-
 				memcpy(buffer,cp,mptcp_option_len);
-				int subtype = buffer[2]>>4;
+				int subtype = (buffer[2]&0xf0)>>4;
 				printf("mp_len %d Subtype %d\n",mptcp_option_len,subtype);
 				
-				
-			//	struct mp_capable* mp = (struct mp_capable*)cp;	
+						
+				do_output(tc,ip,p,tcp,buffer,subtype);
+		
 
 //			printf("KIND %x LENGTH %x SUBTYPE %x version %x Flag %x \n",mp->kind,mp->length,mp->subtype,mp->version, mp->reserved);
 		
-/*			int i;*/
-/*			for( i=0;i<=7;i++){*/
-/*				printf("KEY3 %x\n",mp->sender_key[i]);*/
-/*			}	*/
-			 	
+	
 				option_len++;
 				while(--mptcp_option_len>=0){
 					printf("%02x ",*cp++);
