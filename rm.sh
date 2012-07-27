@@ -22,8 +22,8 @@ linux_set_iptables() {
 }
 
 linux_unset_iptables() {
-    ee iptables -D FORWARD -p tcp --dport 80 -j NFQUEUE --queue-num 666
-    ee iptables -D FORWARD -p tcp --sport 80 -j NFQUEUE --queue-num 666
+    ee iptables -D FORWARD -p tcp -j NFQUEUE --queue-num 666
+    
 }
 check_root() {
     if [ `whoami` != "root" ]
