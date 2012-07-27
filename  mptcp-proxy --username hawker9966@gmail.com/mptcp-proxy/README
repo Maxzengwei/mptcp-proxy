@@ -1,0 +1,16 @@
+src 文件夹中是tcpcrypt的源码
+
+linux.c 防火墙对包的处理
+divert.c 启用divert socket对包进行处理
+pkthandler.c 对包的具体处理
+checksum.c 校验和计算
+
+步骤
+1. 安装下列包
+apt-get install iptables libcap-dev libssl-dev libnfnetlink-dev libnetfilter-queue-dev
+2. make
+3. sudo ./add.sh 启用iptables 防火墙设置
+4. sudo ./mptcp 启动软件
+5. 测试在浏览器随意浏览网页即可
+6. （关键！）退出主程序后
+   sudo ./rm.sh 移除防火墙设置，不然无法正常浏览网页
