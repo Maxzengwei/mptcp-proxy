@@ -1,0 +1,94 @@
+ 	int option_len = (tcp->doff-5) << 2;
+	
+	if(option_len>0){
+
+		printf("optionlen: %d\n",option_len);
+		printf("Checksum:%x\n",ntohs(tcp->check));
+
+		u_char* cp = (u_char *)tcp + sizeof(*tcp);
+		
+		while(--option_len>0 ){
+			switch (*cp++){
+			case TCPOPT_NOP:	/* NOP TYPE */
+			{
+				printf("oplen %d ",option_len);
+				break;
+			}
+
+
+			case TCPOPT_MPTCP: /* MPTCP TYPE */
+			{
+				print_packet(ip, tcp, flags);
+				int mptcp_option_len = *cp;
+				cp--; /* back to first byte */
+				struct mp_capable* mp = (struct mp_capable*) cp;
+/* success		 	mp->kind = 2;
+/* fail 08070605		mp->sender_key = 0x0102030405060708;
+				
+
+/** TODO sender_key display incorrectly */
+			printf("\nKIND %d LENGTH %d SUBTYPE %d\n",mp->kind,mp->length,mp->subtype);
+		
+			//printf("SIZE %d %d %d\n",sizeof(int),sizeof(char), sizeof(mp->sender_key));
+			
+			
+			//printf("KEY2 %x\n",ntohl(mp->sender_key));
+                        if (mp->subtype==0)	
+			    printf("KEY3 %llu\n\n",mp->sender_key); 
+				
+			option_len=0;
+				/*while(--mptcp_option_len>=0){
+					printf("%02x ",*cp++);
+					option_len--;
+					printf("MP len %d\n",option_len);
+				}*/
+				break;
+			}
+
+			case TCPOPT_WSCALE: /* WSCALE TYPE */
+			{
+				printf(" len %d\n",option_len);
+				int wscale_option_len = *cp;
+				cp--; /* back to first byte */
+				option_len++;
+				while(--wscale_option_len>=0){
+//					*cp = 0x01;
+					*cp++;
+					option_len--;
+//					printf(" len %d\n",option_len);
+				}
+				break;
+
+			}
+
+			case TCPOPT_SACK: /* SACK TYPE */
+			{
+				printf(" len %d\n",option_len);
+				int sack_option_len = *cp;
+				cp--; /* back to first byte */
+				option_len++;
+				while(--sack_option_len>=0){
+//					*cp = 0x01;
+					*cp++;
+					option_len--;
+//					printf(" len %d\n",option_len);
+				}
+				break;
+
+			}
+			default: /* Jump To Next Option Type */
+				
+				printf("is here %02x ",*cp);
+				int leng = (int)*cp-1;
+				cp+=leng;
+				option_len-=leng;
+				printf("len %d ",option_len);
+			
+				break;
+			
+			}
+		}
+
+		//print_option(packet,len);
+
+	}
