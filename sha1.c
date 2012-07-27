@@ -39,7 +39,7 @@
  */
 
 #include "sha1.h"
-
+#include <stdio.h>
 /*
  *  Define the circular shift macro
  */
@@ -386,7 +386,7 @@ SHA1Context* SHA1Cal(SHA1Context *sha, const unsigned char *message_array, unsig
 	SHA1Input(sha, (const unsigned char *) message_array, length);
 	if (!SHA1Result(sha))
     	{
-        	printf("ERROR-- could not compute message digest\n");
+        	return NULL;
     	}
         else
             return sha;

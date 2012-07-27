@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <openssl/err.h>
+#include <math.h> 
 
 #include <netinet/in.h>
 #include <linux/netfilter.h>
@@ -28,7 +29,7 @@
 
 #include "divert.h"
 #include "tcpcryptd.h"
-//#include "checksum.h"
+#include "sha1.h"
 #include "pkthandler.h"
 
 struct conn {
@@ -232,7 +233,7 @@ static void tc_init(struct tc *tc)
 {
 	memset(tc, 0, sizeof(*tc));
 
-	tc->tc_state        = TCPSTATE_CLOSED;
+	tc->tc_state        = STATE_IDLE;
 	tc->tc_mtu	    = TC_MTU;
 	tc->tc_mss_clamp    = 40; /* XXX */
 	tc->tc_sack_disable = 1;
@@ -418,8 +419,61 @@ int print_option(void *packet, int len)
 }
 
 
-int Generate_Random_Key(){
-	char key[8];
+int Generate_Random_Key(struct tc *tc){
+	unsigned char key[8];
+        int i;
+        SHA1Context sha;
+        SHA1Context* shar;
+        
+
+
+ 	srand((unsigned)time(NULL));
+ 	for(i = 0; i < 8; i++)
+ 	{
+  		key[i] = rand() % 256;
+  		tc->key_b[i]=key[i];
+                
+ 	}
+        
+        shar=SHA1Cal(&sha, (const unsigned char *) key, 8);
+        if (shar==0)
+          return 0;
+
+        printf("---------SHA-1---------------\n");
+ 
+            
+        for(i = 0; i < 5 ; i++)
+        {
+	    unsigned char digest1[4];
+            printf("\t");
+            printf("%d %x ", i, shar->Message_Digest[i]);
+            memcpy(digest1, &shar->Message_Digest[i], 4);
+            
+#if __BYTE_ORDER == __BIG_ENDIAN
+            tc->SHA[i*4+0]=digest1[0];
+            tc->SHA[i*4+1]=digest1[1];
+            tc->SHA[i*4+2]=digest1[2];
+            tc->SHA[i*4+3]=digest1[3];
+#elif __BYTE_ORDER == __LITTLE_ENDIAN           
+            tc->SHA[i*4+3]=digest1[0];
+            tc->SHA[i*4+2]=digest1[1];
+            tc->SHA[i*4+1]=digest1[2];
+            tc->SHA[i*4+0]=digest1[3];
+#endif
+            printf("%02x%02x%02x%02x ", digest1[0], digest1[1], digest1[2], digest1[3]);
+            printf("%02x%02x%02x%02x \n", tc->SHA[i*4+0], tc->SHA[i*4+1], tc->SHA[i*4+2], tc->SHA[i*4+3]);
+            
+
+        
+            
+            
+
+        }
+        for(i = 0; i < 4 ; i++)
+        {
+        	tc->token_b[i]=tc->SHA[i];
+        }
+
 	return 1; 
 }
 
@@ -443,7 +497,7 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
 
-		if(Generate_Random_Key()){ //TODO
+		if(Generate_Random_Key(tc)){ //TODO
 			struct mp_capable* mp = malloc(sizeof(mp)); //free
 			mp->kind = 30;
 			mp->length = 12;
@@ -473,7 +527,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
 
-		if(Generate_Random_Key()){ //TODO
+		if(Generate_Random_Key(tc)){ //TODO
 			struct mp_capable* mp = malloc(sizeof(mp)); //free
 			mp->kind = 30;
 			mp->length = 12;
@@ -666,7 +720,7 @@ int handle_packet(void *packet, int len, int flags)
 		}
 
 		//print_option(packet,len);
-        //rc=do_output(tc,ip,p,tcp,buffer,subtype);
+        rc=do_output(tc,ip,p,tcp,buffer,subtype);
 	}
 
 	
