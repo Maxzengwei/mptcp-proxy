@@ -91,7 +91,7 @@ struct tc {
 	unsigned char		key_a[8]; 
 	unsigned char		key_b[8]; 
 	unsigned char		SHA[20];
-	unsigned char		token_b[8];
+	unsigned char		token_b[4];
 };
 
 struct tc_ctl {

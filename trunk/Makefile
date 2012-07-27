@@ -1,5 +1,5 @@
 mptcp:	linux.o checksum.o pkthandler.o dsckt.o sha1.o
-	gcc -g -o mptcp linux.o checksum.o pkthandler.o dsckt.o sha1.o -lnfnetlink -lnetfilter_queue -lcap 
+	gcc -g -o mptcp linux.o checksum.o pkthandler.o dsckt.o sha1.o -lnfnetlink -lnetfilter_queue -lcap -lm
 
 linux.o:	divert.h tcpcryptd.h linux.c 
 	gcc -g -c linux.c
