@@ -121,28 +121,29 @@ void print_packet(struct ip *ip, struct tcphdr *tcp, int flags)
 
 
 
-        /*if (tcp->th_flags & TH_SYN)
+        if (tcp->syn==1)
                 flagz[i++] = 'S';
 
-        if (tcp->th_flags & TH_ACK)
+        if (tcp->ack==1)
                 flagz[i++] = 'A';
 
-        if (tcp->th_flags & TH_RST)
+        if (tcp->rst==1)
                 flagz[i++] = 'R';
 
-        if (tcp->th_flags & TH_FIN)
+        if (tcp->fin==1)
                 flagz[i++] = 'F';
-        */
+        
         flagz[i] = 0;
 
         //strcpy(src, inet_ntoa(ip->ip_src));
         xprintf(XP_ALWAYS, "%s:%d",
                 inet_ntoa(ip->ip_src),
                 ntohs(tcp->source));
-        xprintf(XP_ALWAYS, "->%s:%d %d [%s]\n",
+        xprintf(XP_ALWAYS, "->%s:%d %d %s [%s]\n",
                 inet_ntoa(ip->ip_dst),
                 ntohs(tcp->dest),
                 ntohs(ip->ip_len),
+                flagz,
                 flags & DF_IN ? "in" : "out");
 }
 
@@ -512,11 +513,11 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 
 
 	case(STATE_PROXY_OFF):
-		re = DIVERT_ACCEPT;
+		rc = DIVERT_ACCEPT;
 		break;
 	
 	default:
-		xprintf((XP_ALWAYS,"Unknown state %d\n",tc-tc_state);
+		xprintf(XP_ALWAYS,"Unknown state %d\n",tc->tc_state);
 		break;
 	}
 
@@ -595,7 +596,7 @@ int handle_packet(void *packet, int len, int flags)
 			switch (*cp++){
 			case TCPOPT_NOP:	/* NOP TYPE */
 			{
-				printf("oplen %d\n",option_len);
+				//printf("oplen %d\n",option_len);
 				break;
 			}
 
@@ -615,19 +616,19 @@ int handle_packet(void *packet, int len, int flags)
 				while(--mptcp_option_len>=0){
 					printf("%02x ",*cp++);
 					option_len--;
-					printf("MP len %d\n",option_len);
+					printf("MP len %d ",option_len);
 				}
 				break;
 			}
 
 			case TCPOPT_WSCALE: /* WSCALE TYPE */
 			{
-				printf(" len %d\n",option_len);
+				//printf(" len %d\n",option_len);
 				int wscale_option_len = *cp;
 				cp--; /* back to first byte */
 				option_len++;
 				while(--wscale_option_len>=0){
-//					*cp = 0x01;
+					*cp = 0x01;
 					*cp++;
 					option_len--;
 				}
@@ -642,7 +643,7 @@ int handle_packet(void *packet, int len, int flags)
 				cp--; /* back to first byte */
 				option_len++;
 				while(--sack_option_len>=0){
-//					*cp = 0x01;
+					*cp = 0x01;
 					*cp++;
 					option_len--;
 				}
@@ -651,11 +652,11 @@ int handle_packet(void *packet, int len, int flags)
 			}
 			default: /* Jump To Next Option Type */
 				
-				printf("%02x ",*cp);
+				printf(" ");
 				int leng = (int)*cp-1;
 				cp+=leng;
 				option_len-=leng;
-				printf("len %d\n",option_len);
+				printf(" ");
 			
 				break;
 			
@@ -664,13 +665,13 @@ int handle_packet(void *packet, int len, int flags)
 
 		}
 
-		print_option(packet,len);
-
+		//print_option(packet,len);
+        //rc=do_output(tc,ip,p,tcp,buffer,subtype);
 	}
 
 	
 
-	do_output(tc,ip,p,tcp,buffer,subtype);
+	
 
         
         
@@ -690,8 +691,8 @@ int handle_packet(void *packet, int len, int flags)
 	checksum_packet(tc, ip, tcp);
 //	print_packet(ip, tcp, flags);
 
-//	return DIVERT_MODIFY;
-	return DIVERT_ACCEPT;
+
+	return DIVERT_MODIFY;
 
 
 }
