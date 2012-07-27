@@ -14,25 +14,16 @@ ee() {
 }
 
 linux_set_iptables() {
-    echo Tcpcrypting port 80 and local traffic on port 7777...
+    echo Tcpcrypting port 80 
     ee iptables -I INPUT  -p tcp --sport $PORT -j NFQUEUE --queue-num $DIVERT_PORT
     ee iptables -I OUTPUT -p tcp --dport $PORT -j NFQUEUE --queue-num $DIVERT_PORT
-    ee iptables -I INPUT  -p tcp --dport $PORT2 -j NFQUEUE --queue-num $DIVERT_PORT
-    ee iptables -I INPUT  -p tcp --sport $PORT2 -j NFQUEUE --queue-num $DIVERT_PORT
-    ee iptables -I OUTPUT -p tcp --dport $PORT2 -j NFQUEUE --queue-num $DIVERT_PORT
-    ee iptables -I OUTPUT -p tcp --sport $PORT2 -j NFQUEUE --queue-num $DIVERT_PORT
-    wait $!
+    ee iptables -I FORWARD -p tcp -j NFQUEUE --queue-num $DIVERT_PORT
+    ee iptables -I FORWARD -p tcp -j NFQUEUE --queue-num $DIVERT_PORT
 }
 
 linux_unset_iptables() {
-    echo Removing iptables rules and quitting tcpcryptd...
-    iptables -D INPUT  -p tcp --sport $PORT -j NFQUEUE --queue-num $DIVERT_PORT
-    iptables -D OUTPUT -p tcp --dport $PORT -j NFQUEUE --queue-num $DIVERT_PORT
-    iptables -D INPUT  -p tcp --dport $PORT2 -j NFQUEUE --queue-num $DIVERT_PORT
-    iptables -D INPUT  -p tcp --sport $PORT2 -j NFQUEUE --queue-num $DIVERT_PORT
-    iptables -D OUTPUT -p tcp --dport $PORT2 -j NFQUEUE --queue-num $DIVERT_PORT
-    iptables -D OUTPUT -p tcp --sport $PORT2 -j NFQUEUE --queue-num $DIVERT_PORT
-    exit
+    ee iptables -D FORWARD -p tcp --dport 80 -j NFQUEUE --queue-num 666
+    ee iptables -D FORWARD -p tcp --sport 80 -j NFQUEUE --queue-num 666
 }
 check_root() {
     if [ `whoami` != "root" ]
