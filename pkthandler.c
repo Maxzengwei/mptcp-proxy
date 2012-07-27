@@ -416,13 +416,118 @@ int print_option(void *packet, int len)
 	printf("\n");
 }
 
+
+int Generate_Random_Key(){
+	char key[8];
+	return 1; 
+}
+
+int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+	if(tcp->syn == 1 && tcp->ack == 0 && subtype == TYPE_MP_CAPABLE){
+		struct mp_capable* mp = (struct mp_capable*)p;
+		memcpy(tc->key_a,mp->sender_key,sizeof(tc->key_a));
+		tc->tc_state = STATE_SYN_SENT;
+		printf("KEY_A %x\n",tc->key_a[0]);
+		printf("KEY_A %x\n",tc->key_a[1]);
+		return DIVERT_ACCEPT;
+	}
+	return DIVERT_ACCEPT;
+}
+
+int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+	if(tcp->syn == 1 && tcp->ack == 1 && subtype == TYPE_MP_CAPABLE){
+		tc->tc_state = STATE_PROXY_OFF;
+		return DIVERT_ACCEPT;
+	}
+
+	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
+
+		if(Generate_Random_Key()){ //TODO
+			struct mp_capable* mp = malloc(sizeof(mp)); //free
+			mp->kind = 30;
+			mp->length = 12;
+			mp->subtype = TYPE_MP_CAPABLE;
+			mp->version = 0;
+			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO key_b?
+	
+  			void* ptr = (void*) ((unsigned long) tcp + tcp->doff<<2);
+			memcpy(ptr,mp,12);
+			tcp->doff += 3;
+			//TODO checksum->at last?
+
+			tc->tc_state = STATE_SYNACK_SENT;
+			free(mp);
+			return DIVERT_MODIFY;
+		}
+	}
+	return DIVERT_ACCEPT;
+}
+
+
+int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+	if(tcp->syn == 1 && tcp->ack == 1 && subtype == TYPE_MP_CAPABLE){
+		tc->tc_state = STATE_PROXY_OFF;
+		return DIVERT_ACCEPT;
+	}
+
+	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
+
+		if(Generate_Random_Key()){ //TODO
+			struct mp_capable* mp = malloc(sizeof(mp)); //free
+			mp->kind = 30;
+			mp->length = 12;
+			mp->subtype = TYPE_MP_CAPABLE;
+			mp->version = 0;
+			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO key_b?
+	
+  			void* ptr = (void*) ((unsigned long) tcp + tcp->doff<<2);
+			memcpy(ptr,mp,12);
+			tcp->doff += 3;
+			//TODO checksum->at last?
+
+			tc->tc_state = STATE_SYNACK_SENT;
+			free(mp);
+			return DIVERT_MODIFY;
+		}
+	}
+	return DIVERT_ACCEPT;
+}
+
 int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+
+	int rc = DIVERT_ACCEPT;
+
+	switch(tc->tc_state){
+	case(STATE_IDLE):
+		rc = do_output_idle(tc,ip,p,tcp,buffer,subtype);
+		break;
+
+	case(STATE_SYN_SENT):
+		rc = do_output_syn_sent(tc,ip,p,tcp,buffer,subtype);
+		break;	
+
+	case(STATE_SYNACK_SENT):
+		rc = do_output_synack_sent(tc,ip,p,tcp,buffer,subtype);
+		break;	
+
+
+	case(STATE_PROXY_OFF):
+		re = DIVERT_ACCEPT;
+		break;
+	
+	default:
+		xprintf((XP_ALWAYS,"Unknown state %d\n",tc-tc_state);
+		break;
+	}
+
+	free(buffer);
+	
 	char *cp = p;
 	int mptcp_option_len = 12;
-				while(--mptcp_option_len>=0){
-					printf("%02x ",*cp++);				
-					printf("CP len %d\n",mptcp_option_len);
-				}
+/*				while(--mptcp_option_len>=0){*/
+/*					printf("%02x ",*cp++);				*/
+/*					printf("CP len %d\n",mptcp_option_len);*/
+/*				}*/
 
 }
 
@@ -476,7 +581,9 @@ int handle_packet(void *packet, int len, int flags)
 
 
  	int option_len = (tcp->doff-5) << 2;
-	
+	int subtype = -1;	
+	char* buffer = NULL;
+	void *p = NULL;
 	if(option_len>0){
 
 		printf("optionlen: %d\n",option_len);
@@ -496,22 +603,11 @@ int handle_packet(void *packet, int len, int flags)
 			case TCPOPT_MPTCP: /* MPTCP TYPE */
 			{
 				int mptcp_option_len = *cp;
-				char* buffer;
 				cp--; /* back to first byte */
-
-				void *p = cp;
-				printf("Pointer : %d\n",p);
 				buffer = malloc(mptcp_option_len);
-
-
 				memcpy(buffer,cp,mptcp_option_len);
 				int subtype = (buffer[2]&0xf0)>>4;
 				printf("mp_len %d Subtype %d\n",mptcp_option_len,subtype);
-				
-						
-				do_output(tc,ip,p,tcp,buffer,subtype);
-		
-
 //			printf("KIND %x LENGTH %x SUBTYPE %x version %x Flag %x \n",mp->kind,mp->length,mp->subtype,mp->version, mp->reserved);
 		
 	
@@ -564,6 +660,8 @@ int handle_packet(void *packet, int len, int flags)
 				break;
 			
 			}
+
+
 		}
 
 		print_option(packet,len);
@@ -572,7 +670,7 @@ int handle_packet(void *packet, int len, int flags)
 
 	
 
-	
+	do_output(tc,ip,p,tcp,buffer,subtype);
 
         
         

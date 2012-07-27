@@ -21,6 +21,7 @@
 #endif
 
 
+#define TYPE_MP_CAPABLE 0
 enum {
 	TCPSTATE_CLOSED	= 0,
 	TCPSTATE_FIN1_SENT,
@@ -29,6 +30,13 @@ enum {
 	TCPSTATE_FIN2_RCVD,
 	TCPSTATE_LASTACK,
 	TCPSTATE_DEAD,
+};
+
+enum {
+	STATE_IDLE = 0,
+	STATE_SYN_SENT,
+	STATE_PROXY_OFF,
+	STATE_SYNACK_SENT,
 };
 
 enum {
@@ -79,6 +87,11 @@ struct tc {
 	int			tc_optlen;
 	struct conn		*tc_conn;
 	int			tc_app_support;
+
+	unsigned char		key_a[8]; 
+	unsigned char		key_b[8]; 
+	unsigned char		SHA[20];
+	unsigned char		token_b[8];
 };
 
 struct tc_ctl {
