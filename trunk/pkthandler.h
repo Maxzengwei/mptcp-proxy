@@ -108,7 +108,7 @@ struct tc_ctl {
 };
 
 
-struct mp_capable {
+struct mp_capable_12{
 	uint8_t		kind;
 	uint8_t		length;
 #if __BYTE_ORDER == __BIG_ENDIAN
@@ -122,6 +122,21 @@ struct mp_capable {
 	unsigned char	sender_key[8];
 };
 
+
+struct mp_capable_20{
+	uint8_t		kind;
+	uint8_t		length;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char 	version:4;
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	version:4;
+	unsigned char	subtype:4;
+#endif
+	uint8_t		reserved:8;
+	unsigned char	sender_key[8];
+	unsigned char 	receiver_key[8];
+};
 struct mp_join_12{
 	uint8_t		kind;
 	uint8_t 	length;

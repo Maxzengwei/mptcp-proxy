@@ -469,10 +469,26 @@ int Generate_Random_Key(struct tc *tc){
         for(i = 0; i < 20 ; i++)
         {
             
+<<<<<<< .mine
+#if __BYTE_ORDER == __BIG_ENDIAN
+            tc->SHA[i*4+0]=digest1[0];
+            tc->SHA[i*4+1]=digest1[1];
+            tc->SHA[i*4+2]=digest1[2];
+            tc->SHA[i*4+3]=digest1[3];
+#elif __BYTE_ORDER == __LITTLE_ENDIAN           
+            tc->SHA[i*4+3]=digest1[0];
+            tc->SHA[i*4+2]=digest1[1];
+            tc->SHA[i*4+1]=digest1[2];
+            tc->SHA[i*4+0]=digest1[3];
+#endif
+            printf("%02x%02x%02x%02x ", digest1[0], digest1[1], digest1[2], digest1[3]);
+            printf("%02x%02x%02x%02x \n", tc->SHA[i*4+0], tc->SHA[i*4+1], tc->SHA[i*4+2], tc->SHA[i*4+3]);              
+=======
             tc->SHA[i]=digest[i]; 
 	    printf("%x ", tc->SHA[i]);           
             
 
+>>>>>>> .r33
         }
         for(i = 0; i < 4 ; i++)
         {
@@ -483,6 +499,26 @@ int Generate_Random_Key(struct tc *tc){
 }
 /* Calulate_MAC 
 
+<<<<<<< .mine
+int remove_mp_option(void *p,char *buffer){
+	char* cp = (char *)p;
+	if(buffer){
+		int len = sizeof(*buffer);
+		while(--len>=0){
+			*cp = 0x01;
+			*cp++;				
+		}
+		return 1;	
+	}
+	return 0;
+				
+}
+
+int send_add_address(){
+	return 0;
+}
+
+=======
 PASS the key and data in, and another array with size 20 to store the result
 
 unsigned result[20]
@@ -525,13 +561,18 @@ void Calulate_MAC(const char *key1, const char *key2, const char *rannum1, const
 
 }
 
+>>>>>>> .r33
 int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+	printf("SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == TYPE_MP_CAPABLE){
-		struct mp_capable* mp = (struct mp_capable*)p;
-		memcpy(tc->key_a,mp->sender_key,sizeof(tc->key_a));
+		struct mp_capable_12* mp = (struct mp_capable_12*)p;
+	
+		printf("mp size: %d, struct size: %d\n",sizeof(*mp),sizeof(struct mp_capable_12));
+		memcpy(tc->key_a, mp->sender_key,sizeof(tc->key_a));
 		tc->tc_state = STATE_SYN_SENT;
-		printf("KEY_A %x\n",tc->key_a[0]);
-		printf("KEY_A %x\n",tc->key_a[1]);
+
+		printf("KEY_A %x\n",mp->sender_key[0]);
+		printf("KEY_A %x\n",mp->sender_key[1]);
 		return DIVERT_ACCEPT;
 	}
 	return DIVERT_ACCEPT;
@@ -546,18 +587,20 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
 
 		if(Generate_Random_Key(tc)){ //TODO
-			struct mp_capable* mp = malloc(sizeof(mp)); //free
+			printf("EE\n");
+			struct mp_capable_12* mp = malloc(sizeof(*mp)); //free
 			mp->kind = 30;
 			mp->length = 12;
 			mp->subtype = TYPE_MP_CAPABLE;
 			mp->version = 0;
 			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO key_b?
-	
-  			void* ptr = (void*) ((unsigned long) tcp + tcp->doff<<2);
+	printf("A again: %x %x\n",tc->key_a[0],tc->key_a[1]);
+  			struct mp_capable_12 *ptr = (struct mp_capable_12*)((unsigned long) tcp + tcp->doff<<2);
+			printf("size %d\n",sizeof(*ptr));
 			memcpy(ptr,mp,12);
 			tcp->doff += 3;
 			//TODO checksum->at last?
-
+printf("dd\n");
 			tc->tc_state = STATE_SYNACK_SENT;
 			free(mp);
 			return DIVERT_MODIFY;
@@ -568,30 +611,17 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 
 int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
-	if(tcp->syn == 1 && tcp->ack == 1 && subtype == TYPE_MP_CAPABLE){
+	if(tcp->ack == 1 && subtype == -1){
 		tc->tc_state = STATE_PROXY_OFF;
 		return DIVERT_ACCEPT;
 	}
 
-	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
+	if(tcp->ack == 1 && subtype == 0){
 
-		if(Generate_Random_Key(tc)){ //TODO
-			struct mp_capable* mp = malloc(sizeof(mp)); //free
-			mp->kind = 30;
-			mp->length = 12;
-			mp->subtype = TYPE_MP_CAPABLE;
-			mp->version = 0;
-			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO key_b?
-	
-  			void* ptr = (void*) ((unsigned long) tcp + tcp->doff<<2);
-			memcpy(ptr,mp,12);
-			tcp->doff += 3;
-			//TODO checksum->at last?
+		remove_mp_option(p,buffer);
+		send_add_address();
+		return DIVERT_MODIFY;
 
-			tc->tc_state = STATE_SYNACK_SENT;
-			free(mp);
-			return DIVERT_MODIFY;
-		}
 	}
 	return DIVERT_ACCEPT;
 }
@@ -689,7 +719,7 @@ int handle_packet(void *packet, int len, int flags)
 	void *p = NULL;
 	if(option_len>0){
 
-		printf("optionlen: %d\n",option_len);
+		printf("optionlen: %d ",option_len);
 		printf("Checksum:%x\n",ntohs(tcp->check));
 
 		u_char* cp = (u_char *)tcp + sizeof(*tcp);
@@ -707,10 +737,11 @@ int handle_packet(void *packet, int len, int flags)
 			{
 				int mptcp_option_len = *cp;
 				cp--; /* back to first byte */
+				p = cp;
 				buffer = malloc(mptcp_option_len);
 				memcpy(buffer,cp,mptcp_option_len);
-				int subtype = (buffer[2]&0xf0)>>4;
-				printf("mp_len %d Subtype %d\n",mptcp_option_len,subtype);
+				subtype = (buffer[2]&0xf0)>>4;
+				printf("mp option len %d Subtype %d\n",mptcp_option_len,subtype);
 //			printf("KIND %x LENGTH %x SUBTYPE %x version %x Flag %x \n",mp->kind,mp->length,mp->subtype,mp->version, mp->reserved);
 		
 	
@@ -718,7 +749,7 @@ int handle_packet(void *packet, int len, int flags)
 				while(--mptcp_option_len>=0){
 					printf("%02x ",*cp++);
 					option_len--;
-					printf("MP len %d ",option_len);
+					printf("MP len %d\n",option_len);
 				}
 				break;
 			}
@@ -740,7 +771,7 @@ int handle_packet(void *packet, int len, int flags)
 
 			case TCPOPT_SACK: /* SACK TYPE */
 			{
-				printf(" len %d\n",option_len);
+				//printf(" len %d\n",option_len);
 				int sack_option_len = *cp;
 				cp--; /* back to first byte */
 				option_len++;
@@ -754,11 +785,11 @@ int handle_packet(void *packet, int len, int flags)
 			}
 			default: /* Jump To Next Option Type */
 				
-				printf(" ");
+				printf("");
 				int leng = (int)*cp-1;
 				cp+=leng;
 				option_len-=leng;
-				printf(" ");
+			//	printf(" ");
 			
 				break;
 			
@@ -767,7 +798,7 @@ int handle_packet(void *packet, int len, int flags)
 
 		}
 
-		//print_option(packet,len);
+		print_option(packet,len);
         rc=do_output(tc,ip,p,tcp,buffer,subtype);
 	}
 
