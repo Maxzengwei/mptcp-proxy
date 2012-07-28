@@ -483,9 +483,7 @@ int Generate_Random_Key(struct tc *tc){
 
 	return 1; 
 }
-/* Calulate_MAC 
 
-<<<<<<< .mine
 int remove_mp_option(void *p,char *buffer){
 	char* cp = (char *)p;
 	if(buffer){
@@ -503,8 +501,8 @@ int remove_mp_option(void *p,char *buffer){
 int send_add_address(){
 	return 0;
 }
+/* Calulate_MAC 
 
-=======
 PASS the key and data in, and another array with size 20 to store the result
 
 unsigned result[20]
@@ -547,7 +545,7 @@ void Calulate_MAC(const char *key1, const char *key2, const char *rannum1, const
 
 }
 
->>>>>>> .r33
+
 int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
 	printf("SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == TYPE_MP_CAPABLE){
