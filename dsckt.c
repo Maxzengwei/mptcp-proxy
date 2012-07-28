@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <openssl/err.h>
+#include <math.h>
 
 #include <netinet/in.h>
 #include <linux/netfilter.h>
@@ -405,7 +406,7 @@ void mptcp(void)
 int main(int argc, char *argv[])
 {
 	int ch;
-
+	srand((unsigned)time(NULL));
 
 	_conf.cf_port = 666;
 	_conf.cf_ctl  = 666;

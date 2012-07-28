@@ -1,395 +1,428 @@
-/*
- *  sha1.c
- *
- *  Copyright (C) 1998, 2009
- *  Paul E. Jones <paulej@packetizer.com>
- *  All Rights Reserved
- *
- *****************************************************************************
- *  $Id: sha1.c 12 2009-06-22 19:34:25Z paulej $
- *****************************************************************************
- *
- *  Description:
- *      This file implements the Secure Hashing Standard as defined
- *      in FIPS PUB 180-1 published April 17, 1995.
- *
- *      The Secure Hashing Standard, which uses the Secure Hashing
- *      Algorithm (SHA), produces a 160-bit message digest for a
- *      given data stream.  In theory, it is highly improbable that
- *      two messages will produce the same message digest.  Therefore,
- *      this algorithm can serve as a means of providing a "fingerprint"
- *      for a message.
- *
- *  Portability Issues:
- *      SHA-1 is defined in terms of 32-bit "words".  This code was
- *      written with the expectation that the processor has at least
- *      a 32-bit machine word size.  If the machine word size is larger,
- *      the code should still function properly.  One caveat to that
- *      is that the input functions taking characters and character
- *      arrays assume that only 8 bits of information are stored in each
- *      character.
- *
- *  Caveats:
- *      SHA-1 is designed to work with messages less than 2^64 bits
- *      long. Although SHA-1 allows a message digest to be generated for
- *      messages of any number of bits less than 2^64, this
- *      implementation only works with messages with a length that is a
- *      multiple of the size of an 8-bit character.
- *
- */
+/* sha1.c - Functions to compute SHA1 message digest of files or
+   memory blocks according to the NIST specification FIPS-180-1.
+
+   Copyright (C) 2000, 2001, 2003, 2004, 2005, 2006, 2008, 2009, 2010 Free
+   Software Foundation, Inc.
+
+   This program is free software; you can redistribute it and/or modify it
+   under the terms of the GNU General Public License as published by the
+   Free Software Foundation; either version 3, or (at your option) any
+   later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software Foundation,
+   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.  */
+
+/* Written by Scott G. Miller
+   Credits:
+      Robert Klep <robert@ilse.nl>  -- Expansion function fix
+*/
+
+//#include <config.h>
 
 #include "sha1.h"
-#include <stdio.h>
-/*
- *  Define the circular shift macro
- */
-#define SHA1CircularShift(bits,word) \
-                ((((word) << (bits)) & 0xFFFFFFFF) | \
-                ((word) >> (32-(bits))))
 
-/* Function prototypes */
-void SHA1ProcessMessageBlock(SHA1Context *);
-void SHA1PadMessage(SHA1Context *);
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
-/*  
- *  SHA1Reset
- *
- *  Description:
- *      This function will initialize the SHA1Context in preparation
- *      for computing a new message digest.
- *
- *  Parameters:
- *      context: [in/out]
- *          The context to reset.
- *
- *  Returns:
- *      Nothing.
- *
- *  Comments:
- *
- */
-void SHA1Reset(SHA1Context *context)
+#if USE_UNLOCKED_IO
+# include "unlocked-io.h"
+#endif
+
+#ifdef WORDS_BIGENDIAN
+# define SWAP(n) (n)
+#else
+# define SWAP(n) \
+    (((n) << 24) | (((n) & 0xff00) << 8) | (((n) >> 8) & 0xff00) | ((n) >> 24))
+#endif
+
+#define BLOCKSIZE 32768
+#if BLOCKSIZE % 64 != 0
+# error "invalid BLOCKSIZE"
+#endif
+
+/* This array contains the bytes used to pad the buffer to the next
+   64-byte boundary.  (RFC 1321, 3.1: Step 1)  */
+static const unsigned char fillbuf[64] = { 0x80, 0 /* , 0, 0, ...  */ };
+
+
+/* Take a pointer to a 160 bit block of data (five 32 bit ints) and
+   initialize it to the start constants of the SHA1 algorithm.  This
+   must be called before using hash in the call to sha1_hash.  */
+void
+sha1_init_ctx (struct sha1_ctx *ctx)
 {
-    context->Length_Low             = 0;
-    context->Length_High            = 0;
-    context->Message_Block_Index    = 0;
+  ctx->A = 0x67452301;
+  ctx->B = 0xefcdab89;
+  ctx->C = 0x98badcfe;
+  ctx->D = 0x10325476;
+  ctx->E = 0xc3d2e1f0;
 
-    context->Message_Digest[0]      = 0x67452301;
-    context->Message_Digest[1]      = 0xEFCDAB89;
-    context->Message_Digest[2]      = 0x98BADCFE;
-    context->Message_Digest[3]      = 0x10325476;
-    context->Message_Digest[4]      = 0xC3D2E1F0;
-
-    context->Computed   = 0;
-    context->Corrupted  = 0;
+  ctx->total[0] = ctx->total[1] = 0;
+  ctx->buflen = 0;
 }
 
-/*  
- *  SHA1Result
- *
- *  Description:
- *      This function will return the 160-bit message digest into the
- *      Message_Digest array within the SHA1Context provided
- *
- *  Parameters:
- *      context: [in/out]
- *          The context to use to calculate the SHA-1 hash.
- *
- *  Returns:
- *      1 if successful, 0 if it failed.
- *
- *  Comments:
- *
- */
-int SHA1Result(SHA1Context *context)
+/* Copy the 4 byte value from v into the memory location pointed to by *cp,
+   If your architecture allows unaligned access this is equivalent to
+   * (uint32_t *) cp = v  */
+static inline void
+set_uint32 (char *cp, uint32_t v)
 {
+  memcpy (cp, &v, sizeof v);
+}
 
-    if (context->Corrupted)
-    {
-        return 0;
-    }
+/* Put result from CTX in first 20 bytes following RESBUF.  The result
+   must be in little endian byte order.  */
+void *
+sha1_read_ctx (const struct sha1_ctx *ctx, void *resbuf)
+{
+  char *r = resbuf;
+  set_uint32 (r + 0 * sizeof ctx->A, SWAP (ctx->A));
+  set_uint32 (r + 1 * sizeof ctx->B, SWAP (ctx->B));
+  set_uint32 (r + 2 * sizeof ctx->C, SWAP (ctx->C));
+  set_uint32 (r + 3 * sizeof ctx->D, SWAP (ctx->D));
+  set_uint32 (r + 4 * sizeof ctx->E, SWAP (ctx->E));
 
-    if (!context->Computed)
-    {
-        SHA1PadMessage(context);
-        context->Computed = 1;
-    }
+  return resbuf;
+}
 
+/* Process the remaining bytes in the internal buffer and the usual
+   prolog according to the standard and write the result to RESBUF.  */
+void *
+sha1_finish_ctx (struct sha1_ctx *ctx, void *resbuf)
+{
+  /* Take yet unprocessed bytes into account.  */
+  uint32_t bytes = ctx->buflen;
+  size_t size = (bytes < 56) ? 64 / 4 : 64 * 2 / 4;
+
+  /* Now count remaining bytes.  */
+  ctx->total[0] += bytes;
+  if (ctx->total[0] < bytes)
+    ++ctx->total[1];
+
+  /* Put the 64-bit file length in *bits* at the end of the buffer.  */
+  ctx->buffer[size - 2] = SWAP ((ctx->total[1] << 3) | (ctx->total[0] >> 29));
+  ctx->buffer[size - 1] = SWAP (ctx->total[0] << 3);
+
+  memcpy (&((char *) ctx->buffer)[bytes], fillbuf, (size - 2) * 4 - bytes);
+
+  /* Process last bytes.  */
+  sha1_process_block (ctx->buffer, size * 4, ctx);
+
+  return sha1_read_ctx (ctx, resbuf);
+}
+
+/* Compute SHA1 message digest for bytes read from STREAM.  The
+   resulting message digest number will be written into the 16 bytes
+   beginning at RESBLOCK.  */
+int
+sha1_stream (FILE *stream, void *resblock)
+{
+  struct sha1_ctx ctx;
+  size_t sum;
+
+  char *buffer = malloc (BLOCKSIZE + 72);
+  if (!buffer)
     return 1;
-}
 
-/*  
- *  SHA1Input
- *
- *  Description:
- *      This function accepts an array of octets as the next portion of
- *      the message.
- *
- *  Parameters:
- *      context: [in/out]
- *          The SHA-1 context to update
- *      message_array: [in]
- *          An array of characters representing the next portion of the
- *          message.
- *      length: [in]
- *          The length of the message in message_array
- *
- *  Returns:
- *      Nothing.
- *
- *  Comments:
- *
- */
-void SHA1Input(     SHA1Context         *context,
-                    const unsigned char *message_array,
-                    unsigned            length)
-{
-    if (!length)
+  /* Initialize the computation context.  */
+  sha1_init_ctx (&ctx);
+
+  /* Iterate over full file contents.  */
+  while (1)
     {
-        return;
-    }
+      /* We read the file in blocks of BLOCKSIZE bytes.  One call of the
+         computation function processes the whole buffer so that with the
+         next round of the loop another block can be read.  */
+      size_t n;
+      sum = 0;
 
-    if (context->Computed || context->Corrupted)
-    {
-        context->Corrupted = 1;
-        return;
-    }
-
-    while(length-- && !context->Corrupted)
-    {
-        context->Message_Block[context->Message_Block_Index++] =
-                                                (*message_array & 0xFF);
-
-        context->Length_Low += 8;
-        /* Force it to 32 bits */
-        context->Length_Low &= 0xFFFFFFFF;
-        if (context->Length_Low == 0)
+      /* Read block.  Take care for partial reads.  */
+      while (1)
         {
-            context->Length_High++;
-            /* Force it to 32 bits */
-            context->Length_High &= 0xFFFFFFFF;
-            if (context->Length_High == 0)
+          n = fread (buffer + sum, 1, BLOCKSIZE - sum, stream);
+
+          sum += n;
+
+          if (sum == BLOCKSIZE)
+            break;
+
+          if (n == 0)
             {
-                /* Message is too long */
-                context->Corrupted = 1;
+              /* Check for the error flag IFF N == 0, so that we don't
+                 exit the loop after a partial read due to e.g., EAGAIN
+                 or EWOULDBLOCK.  */
+              if (ferror (stream))
+                {
+                  free (buffer);
+                  return 1;
+                }
+              goto process_partial_block;
             }
+
+          /* We've read at least one byte, so ignore errors.  But always
+             check for EOF, since feof may be true even though N > 0.
+             Otherwise, we could end up calling fread after EOF.  */
+          if (feof (stream))
+            goto process_partial_block;
         }
 
-        if (context->Message_Block_Index == 64)
+      /* Process buffer with BLOCKSIZE bytes.  Note that
+                        BLOCKSIZE % 64 == 0
+       */
+      sha1_process_block (buffer, BLOCKSIZE, &ctx);
+    }
+
+ process_partial_block:;
+
+  /* Process any remaining bytes.  */
+  if (sum > 0)
+    sha1_process_bytes (buffer, sum, &ctx);
+
+  /* Construct result in desired memory.  */
+  sha1_finish_ctx (&ctx, resblock);
+  free (buffer);
+  return 0;
+}
+
+/* Compute SHA1 message digest for LEN bytes beginning at BUFFER.  The
+   result is always in little endian byte order, so that a byte-wise
+   output yields to the wanted ASCII representation of the message
+   digest.  */
+void *
+sha1_buffer (const char *buffer, size_t len, void *resblock)
+{
+  struct sha1_ctx ctx;
+
+  /* Initialize the computation context.  */
+  sha1_init_ctx (&ctx);
+
+  /* Process whole buffer but last len % 64 bytes.  */
+  sha1_process_bytes (buffer, len, &ctx);
+
+  /* Put result in desired memory area.  */
+  return sha1_finish_ctx (&ctx, resblock);
+}
+
+void
+sha1_process_bytes (const void *buffer, size_t len, struct sha1_ctx *ctx)
+{
+  /* When we already have some bits in our internal buffer concatenate
+     both inputs first.  */
+  if (ctx->buflen != 0)
+    {
+      size_t left_over = ctx->buflen;
+      size_t add = 128 - left_over > len ? len : 128 - left_over;
+
+      memcpy (&((char *) ctx->buffer)[left_over], buffer, add);
+      ctx->buflen += add;
+
+      if (ctx->buflen > 64)
         {
-            SHA1ProcessMessageBlock(context);
+          sha1_process_block (ctx->buffer, ctx->buflen & ~63, ctx);
+
+          ctx->buflen &= 63;
+          /* The regions in the following copy operation cannot overlap.  */
+          memcpy (ctx->buffer,
+                  &((char *) ctx->buffer)[(left_over + add) & ~63],
+                  ctx->buflen);
         }
 
-        message_array++;
+      buffer = (const char *) buffer + add;
+      len -= add;
+    }
+
+  /* Process available complete blocks.  */
+  if (len >= 64)
+    {
+#if !_STRING_ARCH_unaligned
+# define alignof(type) offsetof (struct { char c; type x; }, x)
+# define UNALIGNED_P(p) (((size_t) p) % alignof (uint32_t) != 0)
+      if (UNALIGNED_P (buffer))
+        while (len > 64)
+          {
+            sha1_process_block (memcpy (ctx->buffer, buffer, 64), 64, ctx);
+            buffer = (const char *) buffer + 64;
+            len -= 64;
+          }
+      else
+#endif
+        {
+          sha1_process_block (buffer, len & ~63, ctx);
+          buffer = (const char *) buffer + (len & ~63);
+          len &= 63;
+        }
+    }
+
+  /* Move remaining bytes in internal buffer.  */
+  if (len > 0)
+    {
+      size_t left_over = ctx->buflen;
+
+      memcpy (&((char *) ctx->buffer)[left_over], buffer, len);
+      left_over += len;
+      if (left_over >= 64)
+        {
+          sha1_process_block (ctx->buffer, 64, ctx);
+          left_over -= 64;
+          memcpy (ctx->buffer, &ctx->buffer[16], left_over);
+        }
+      ctx->buflen = left_over;
     }
 }
 
-/*  
- *  SHA1ProcessMessageBlock
- *
- *  Description:
- *      This function will process the next 512 bits of the message
- *      stored in the Message_Block array.
- *
- *  Parameters:
- *      None.
- *
- *  Returns:
- *      Nothing.
- *
- *  Comments:
- *      Many of the variable names in the SHAContext, especially the
- *      single character names, were used because those were the names
- *      used in the publication.
- *         
- *
- */
-void SHA1ProcessMessageBlock(SHA1Context *context)
+/* --- Code below is the primary difference between md5.c and sha1.c --- */
+
+/* SHA1 round constants */
+#define K1 0x5a827999
+#define K2 0x6ed9eba1
+#define K3 0x8f1bbcdc
+#define K4 0xca62c1d6
+
+/* Round functions.  Note that F2 is the same as F4.  */
+#define F1(B,C,D) ( D ^ ( B & ( C ^ D ) ) )
+#define F2(B,C,D) (B ^ C ^ D)
+#define F3(B,C,D) ( ( B & C ) | ( D & ( B | C ) ) )
+#define F4(B,C,D) (B ^ C ^ D)
+
+/* Process LEN bytes of BUFFER, accumulating context into CTX.
+   It is assumed that LEN % 64 == 0.
+   Most of this code comes from GnuPG's cipher/sha1.c.  */
+
+void
+sha1_process_block (const void *buffer, size_t len, struct sha1_ctx *ctx)
 {
-    const unsigned K[] =            /* Constants defined in SHA-1   */      
+  const uint32_t *words = buffer;
+  size_t nwords = len / sizeof (uint32_t);
+  const uint32_t *endp = words + nwords;
+  uint32_t x[16];
+  uint32_t a = ctx->A;
+  uint32_t b = ctx->B;
+  uint32_t c = ctx->C;
+  uint32_t d = ctx->D;
+  uint32_t e = ctx->E;
+
+  /* First increment the byte count.  RFC 1321 specifies the possible
+     length of the file up to 2^64 bits.  Here we only compute the
+     number of bytes.  Do a double word increment.  */
+  ctx->total[0] += len;
+  if (ctx->total[0] < len)
+    ++ctx->total[1];
+
+#define rol(x, n) (((x) << (n)) | ((uint32_t) (x) >> (32 - (n))))
+
+#define M(I) ( tm =   x[I&0x0f] ^ x[(I-14)&0x0f] \
+                    ^ x[(I-8)&0x0f] ^ x[(I-3)&0x0f] \
+               , (x[I&0x0f] = rol(tm, 1)) )
+
+#define R(A,B,C,D,E,F,K,M)  do { E += rol( A, 5 )     \
+                                      + F( B, C, D )  \
+                                      + K             \
+                                      + M;            \
+                                 B = rol( B, 30 );    \
+                               } while(0)
+
+  while (words < endp)
     {
-        0x5A827999,
-        0x6ED9EBA1,
-        0x8F1BBCDC,
-        0xCA62C1D6
-    };
-    int         t;                  /* Loop counter                 */
-    unsigned    temp;               /* Temporary word value         */
-    unsigned    W[80];              /* Word sequence                */
-    unsigned    A, B, C, D, E;      /* Word buffers                 */
-
-    /*
-     *  Initialize the first 16 words in the array W
-     */
-    for(t = 0; t < 16; t++)
-    {
-        W[t] = ((unsigned) context->Message_Block[t * 4]) << 24;
-        W[t] |= ((unsigned) context->Message_Block[t * 4 + 1]) << 16;
-        W[t] |= ((unsigned) context->Message_Block[t * 4 + 2]) << 8;
-        W[t] |= ((unsigned) context->Message_Block[t * 4 + 3]);
-    }
-
-    for(t = 16; t < 80; t++)
-    {
-       W[t] = SHA1CircularShift(1,W[t-3] ^ W[t-8] ^ W[t-14] ^ W[t-16]);
-    }
-
-    A = context->Message_Digest[0];
-    B = context->Message_Digest[1];
-    C = context->Message_Digest[2];
-    D = context->Message_Digest[3];
-    E = context->Message_Digest[4];
-
-    for(t = 0; t < 20; t++)
-    {
-        temp =  SHA1CircularShift(5,A) +
-                ((B & C) | ((~B) & D)) + E + W[t] + K[0];
-        temp &= 0xFFFFFFFF;
-        E = D;
-        D = C;
-        C = SHA1CircularShift(30,B);
-        B = A;
-        A = temp;
-    }
-
-    for(t = 20; t < 40; t++)
-    {
-        temp = SHA1CircularShift(5,A) + (B ^ C ^ D) + E + W[t] + K[1];
-        temp &= 0xFFFFFFFF;
-        E = D;
-        D = C;
-        C = SHA1CircularShift(30,B);
-        B = A;
-        A = temp;
-    }
-
-    for(t = 40; t < 60; t++)
-    {
-        temp = SHA1CircularShift(5,A) +
-               ((B & C) | (B & D) | (C & D)) + E + W[t] + K[2];
-        temp &= 0xFFFFFFFF;
-        E = D;
-        D = C;
-        C = SHA1CircularShift(30,B);
-        B = A;
-        A = temp;
-    }
-
-    for(t = 60; t < 80; t++)
-    {
-        temp = SHA1CircularShift(5,A) + (B ^ C ^ D) + E + W[t] + K[3];
-        temp &= 0xFFFFFFFF;
-        E = D;
-        D = C;
-        C = SHA1CircularShift(30,B);
-        B = A;
-        A = temp;
-    }
-
-    context->Message_Digest[0] =
-                        (context->Message_Digest[0] + A) & 0xFFFFFFFF;
-    context->Message_Digest[1] =
-                        (context->Message_Digest[1] + B) & 0xFFFFFFFF;
-    context->Message_Digest[2] =
-                        (context->Message_Digest[2] + C) & 0xFFFFFFFF;
-    context->Message_Digest[3] =
-                        (context->Message_Digest[3] + D) & 0xFFFFFFFF;
-    context->Message_Digest[4] =
-                        (context->Message_Digest[4] + E) & 0xFFFFFFFF;
-
-    context->Message_Block_Index = 0;
-}
-
-/*  
- *  SHA1PadMessage
- *
- *  Description:
- *      According to the standard, the message must be padded to an even
- *      512 bits.  The first padding bit must be a '1'.  The last 64
- *      bits represent the length of the original message.  All bits in
- *      between should be 0.  This function will pad the message
- *      according to those rules by filling the Message_Block array
- *      accordingly.  It will also call SHA1ProcessMessageBlock()
- *      appropriately.  When it returns, it can be assumed that the
- *      message digest has been computed.
- *
- *  Parameters:
- *      context: [in/out]
- *          The context to pad
- *
- *  Returns:
- *      Nothing.
- *
- *  Comments:
- *
- */
-void SHA1PadMessage(SHA1Context *context)
-{
-    /*
-     *  Check to see if the current message block is too small to hold
-     *  the initial padding bits and length.  If so, we will pad the
-     *  block, process it, and then continue padding into a second
-     *  block.
-     */
-    if (context->Message_Block_Index > 55)
-    {
-        context->Message_Block[context->Message_Block_Index++] = 0x80;
-        while(context->Message_Block_Index < 64)
+      uint32_t tm;
+      int t;
+      for (t = 0; t < 16; t++)
         {
-            context->Message_Block[context->Message_Block_Index++] = 0;
+          x[t] = SWAP (*words);
+          words++;
         }
 
-        SHA1ProcessMessageBlock(context);
+      R( a, b, c, d, e, F1, K1, x[ 0] );
+      R( e, a, b, c, d, F1, K1, x[ 1] );
+      R( d, e, a, b, c, F1, K1, x[ 2] );
+      R( c, d, e, a, b, F1, K1, x[ 3] );
+      R( b, c, d, e, a, F1, K1, x[ 4] );
+      R( a, b, c, d, e, F1, K1, x[ 5] );
+      R( e, a, b, c, d, F1, K1, x[ 6] );
+      R( d, e, a, b, c, F1, K1, x[ 7] );
+      R( c, d, e, a, b, F1, K1, x[ 8] );
+      R( b, c, d, e, a, F1, K1, x[ 9] );
+      R( a, b, c, d, e, F1, K1, x[10] );
+      R( e, a, b, c, d, F1, K1, x[11] );
+      R( d, e, a, b, c, F1, K1, x[12] );
+      R( c, d, e, a, b, F1, K1, x[13] );
+      R( b, c, d, e, a, F1, K1, x[14] );
+      R( a, b, c, d, e, F1, K1, x[15] );
+      R( e, a, b, c, d, F1, K1, M(16) );
+      R( d, e, a, b, c, F1, K1, M(17) );
+      R( c, d, e, a, b, F1, K1, M(18) );
+      R( b, c, d, e, a, F1, K1, M(19) );
+      R( a, b, c, d, e, F2, K2, M(20) );
+      R( e, a, b, c, d, F2, K2, M(21) );
+      R( d, e, a, b, c, F2, K2, M(22) );
+      R( c, d, e, a, b, F2, K2, M(23) );
+      R( b, c, d, e, a, F2, K2, M(24) );
+      R( a, b, c, d, e, F2, K2, M(25) );
+      R( e, a, b, c, d, F2, K2, M(26) );
+      R( d, e, a, b, c, F2, K2, M(27) );
+      R( c, d, e, a, b, F2, K2, M(28) );
+      R( b, c, d, e, a, F2, K2, M(29) );
+      R( a, b, c, d, e, F2, K2, M(30) );
+      R( e, a, b, c, d, F2, K2, M(31) );
+      R( d, e, a, b, c, F2, K2, M(32) );
+      R( c, d, e, a, b, F2, K2, M(33) );
+      R( b, c, d, e, a, F2, K2, M(34) );
+      R( a, b, c, d, e, F2, K2, M(35) );
+      R( e, a, b, c, d, F2, K2, M(36) );
+      R( d, e, a, b, c, F2, K2, M(37) );
+      R( c, d, e, a, b, F2, K2, M(38) );
+      R( b, c, d, e, a, F2, K2, M(39) );
+      R( a, b, c, d, e, F3, K3, M(40) );
+      R( e, a, b, c, d, F3, K3, M(41) );
+      R( d, e, a, b, c, F3, K3, M(42) );
+      R( c, d, e, a, b, F3, K3, M(43) );
+      R( b, c, d, e, a, F3, K3, M(44) );
+      R( a, b, c, d, e, F3, K3, M(45) );
+      R( e, a, b, c, d, F3, K3, M(46) );
+      R( d, e, a, b, c, F3, K3, M(47) );
+      R( c, d, e, a, b, F3, K3, M(48) );
+      R( b, c, d, e, a, F3, K3, M(49) );
+      R( a, b, c, d, e, F3, K3, M(50) );
+      R( e, a, b, c, d, F3, K3, M(51) );
+      R( d, e, a, b, c, F3, K3, M(52) );
+      R( c, d, e, a, b, F3, K3, M(53) );
+      R( b, c, d, e, a, F3, K3, M(54) );
+      R( a, b, c, d, e, F3, K3, M(55) );
+      R( e, a, b, c, d, F3, K3, M(56) );
+      R( d, e, a, b, c, F3, K3, M(57) );
+      R( c, d, e, a, b, F3, K3, M(58) );
+      R( b, c, d, e, a, F3, K3, M(59) );
+      R( a, b, c, d, e, F4, K4, M(60) );
+      R( e, a, b, c, d, F4, K4, M(61) );
+      R( d, e, a, b, c, F4, K4, M(62) );
+      R( c, d, e, a, b, F4, K4, M(63) );
+      R( b, c, d, e, a, F4, K4, M(64) );
+      R( a, b, c, d, e, F4, K4, M(65) );
+      R( e, a, b, c, d, F4, K4, M(66) );
+      R( d, e, a, b, c, F4, K4, M(67) );
+      R( c, d, e, a, b, F4, K4, M(68) );
+      R( b, c, d, e, a, F4, K4, M(69) );
+      R( a, b, c, d, e, F4, K4, M(70) );
+      R( e, a, b, c, d, F4, K4, M(71) );
+      R( d, e, a, b, c, F4, K4, M(72) );
+      R( c, d, e, a, b, F4, K4, M(73) );
+      R( b, c, d, e, a, F4, K4, M(74) );
+      R( a, b, c, d, e, F4, K4, M(75) );
+      R( e, a, b, c, d, F4, K4, M(76) );
+      R( d, e, a, b, c, F4, K4, M(77) );
+      R( c, d, e, a, b, F4, K4, M(78) );
+      R( b, c, d, e, a, F4, K4, M(79) );
 
-        while(context->Message_Block_Index < 56)
-        {
-            context->Message_Block[context->Message_Block_Index++] = 0;
-        }
+      a = ctx->A += a;
+      b = ctx->B += b;
+      c = ctx->C += c;
+      d = ctx->D += d;
+      e = ctx->E += e;
     }
-    else
-    {
-        context->Message_Block[context->Message_Block_Index++] = 0x80;
-        while(context->Message_Block_Index < 56)
-        {
-            context->Message_Block[context->Message_Block_Index++] = 0;
-        }
-    }
-
-    /*
-     *  Store the message length as the last 8 octets
-     */
-    context->Message_Block[56] = (context->Length_High >> 24) & 0xFF;
-    context->Message_Block[57] = (context->Length_High >> 16) & 0xFF;
-    context->Message_Block[58] = (context->Length_High >> 8) & 0xFF;
-    context->Message_Block[59] = (context->Length_High) & 0xFF;
-    context->Message_Block[60] = (context->Length_Low >> 24) & 0xFF;
-    context->Message_Block[61] = (context->Length_Low >> 16) & 0xFF;
-    context->Message_Block[62] = (context->Length_Low >> 8) & 0xFF;
-    context->Message_Block[63] = (context->Length_Low) & 0xFF;
-
-    SHA1ProcessMessageBlock(context);
-}
-
-/* SHA1 API
-   Usage
-   
-     SHA1Context sha;
-     SHA1Context* shar;
-     shar=SHA1Cal(&sha, (const unsigned char *) message, strlen(message));
-   Result is in shar->Message_Digest[i]
-
-*/
-SHA1Context* SHA1Cal(SHA1Context *sha, const unsigned char *message_array, unsigned length)
-{
- 
-	SHA1Reset(sha);
-	SHA1Input(sha, (const unsigned char *) message_array, length);
-	if (!SHA1Result(sha))
-    	{
-        	return NULL;
-    	}
-        else
-            return sha;
-
-
 }

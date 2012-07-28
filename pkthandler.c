@@ -418,54 +418,59 @@ int print_option(void *packet, int len)
 	printf("\n");
 }
 
+/* Generate Random Num 
 
+PASS the array and the length in
+
+unsigned result[20]
+MACA = (result, 20);
+
+*/
+
+
+void Generate_Random_Num(char *result, int len)
+{	
+	int i;
+	
+ 	for(i = 0; i < len; i++)
+ 	{
+  		result[i] = rand() % 256;
+  		
+                
+ 	}
+
+
+
+
+
+}
 int Generate_Random_Key(struct tc *tc){
 	unsigned char key[8];
         int i;
-        SHA1Context sha;
-        SHA1Context* shar;
+	unsigned char digest[8];
+        
         
 
-
- 	srand((unsigned)time(NULL));
+	
+	Generate_Random_Num(key, 8);
+	
  	for(i = 0; i < 8; i++)
  	{
-  		key[i] = rand() % 256;
+  		
   		tc->key_b[i]=key[i];
                 
  	}
-        
-        shar=SHA1Cal(&sha, (const unsigned char *) key, 8);
-        if (shar==0)
-          return 0;
 
+
+        sha1_buffer(key, 8, digest); 
         printf("---------SHA-1---------------\n");
  
             
-        for(i = 0; i < 5 ; i++)
+        for(i = 0; i < 20 ; i++)
         {
-	    unsigned char digest1[4];
-            printf("\t");
-            printf("%d %x ", i, shar->Message_Digest[i]);
-            memcpy(digest1, &shar->Message_Digest[i], 4);
             
-#if __BYTE_ORDER == __BIG_ENDIAN
-            tc->SHA[i*4+0]=digest1[0];
-            tc->SHA[i*4+1]=digest1[1];
-            tc->SHA[i*4+2]=digest1[2];
-            tc->SHA[i*4+3]=digest1[3];
-#elif __BYTE_ORDER == __LITTLE_ENDIAN           
-            tc->SHA[i*4+3]=digest1[0];
-            tc->SHA[i*4+2]=digest1[1];
-            tc->SHA[i*4+1]=digest1[2];
-            tc->SHA[i*4+0]=digest1[3];
-#endif
-            printf("%02x%02x%02x%02x ", digest1[0], digest1[1], digest1[2], digest1[3]);
-            printf("%02x%02x%02x%02x \n", tc->SHA[i*4+0], tc->SHA[i*4+1], tc->SHA[i*4+2], tc->SHA[i*4+3]);
-            
-
-        
-            
+            tc->SHA[i]=digest[i]; 
+	    printf("%x ", tc->SHA[i]);           
             
 
         }
@@ -475,6 +480,49 @@ int Generate_Random_Key(struct tc *tc){
         }
 
 	return 1; 
+}
+/* Calulate_MAC 
+
+PASS the key and data in, and another array with size 20 to store the result
+
+unsigned result[20]
+MACA = (tc->key_a, tc->key_b, Random Num A, Random Num B, result)
+MACB = (tc->key_b, tc->key_a, Random Num B, Random Num A, result)
+
+*/
+void Calulate_MAC(const char *key1, const char *key2, const char *rannum1, const char *rannum2, char *result)
+{
+	int i=0;
+
+	unsigned char key[16];
+        unsigned char in[8];
+
+	for(i=0;i<16;i++)
+        {
+           if (i<8)
+           key[i]=key1[i];
+           else
+           key[i]=key2[i-8];
+
+
+        }
+
+	for(i=0;i<8;i++)
+        {
+           if (i<4)
+           in[i]=rannum1[i];
+           else
+           in[i]=rannum2[i-4];
+
+
+        }
+
+        
+
+
+	hmac_sha1(key, 16, in, 8, result);	
+
+
 }
 
 int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
