@@ -469,26 +469,12 @@ int Generate_Random_Key(struct tc *tc){
         for(i = 0; i < 20 ; i++)
         {
             
-<<<<<<< .mine
-#if __BYTE_ORDER == __BIG_ENDIAN
-            tc->SHA[i*4+0]=digest1[0];
-            tc->SHA[i*4+1]=digest1[1];
-            tc->SHA[i*4+2]=digest1[2];
-            tc->SHA[i*4+3]=digest1[3];
-#elif __BYTE_ORDER == __LITTLE_ENDIAN           
-            tc->SHA[i*4+3]=digest1[0];
-            tc->SHA[i*4+2]=digest1[1];
-            tc->SHA[i*4+1]=digest1[2];
-            tc->SHA[i*4+0]=digest1[3];
-#endif
-            printf("%02x%02x%02x%02x ", digest1[0], digest1[1], digest1[2], digest1[3]);
-            printf("%02x%02x%02x%02x \n", tc->SHA[i*4+0], tc->SHA[i*4+1], tc->SHA[i*4+2], tc->SHA[i*4+3]);              
-=======
+
             tc->SHA[i]=digest[i]; 
 	    printf("%x ", tc->SHA[i]);           
             
 
->>>>>>> .r33
+
         }
         for(i = 0; i < 4 ; i++)
         {
