@@ -456,6 +456,7 @@ void Generate_Random_Num(char *result, int len)
 
 }
 int Generate_Random_Key(struct tc *tc){
+
 	unsigned char key[8];
         int i;
 	unsigned char digest[8];
@@ -487,8 +488,11 @@ int Generate_Random_Key(struct tc *tc){
 
 
         }
+
+		
         for(i = 0; i < 4 ; i++)
         {
+		printf("I'm here abcd\n");
         	tc->token_b[i]=tc->SHA[i];
         }
 
@@ -580,24 +584,27 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	}
 
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
-	
-	printf("I'm here abcd\n");
-		if(Generate_Random_Key(tc)){ //TODO
+	int f=1;
+	//f=Generate_Random_Key(tc); TODO STACK SMASHED Problem!!
+        if (f==1)
+		{ //TODO
 			printf("EE\n");
-			struct mp_capable_12* mp = malloc(sizeof(struct mp_capable_12)); //free
+			struct mp_capable_12 *mp;
+			mp = malloc(sizeof(struct mp_capable_12)); //free
 			mp->kind = 30;
 			mp->length = 12;
 			mp->subtype = TYPE_MP_CAPABLE;
 			mp->version = 0;                        
-			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO key_b?
-
+			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO Works Fine!!
+			printf("I'm here abcdefg\n");
 			printf("A again: %x %x\n",tc->key_a[0],tc->key_a[1]);
   			struct mp_capable_12 *ptr = (struct mp_capable_12*)((unsigned long) tcp + tcp->doff<<2);
 			printf("size %d\n",sizeof(struct mp_capable_12));
-			memcpy(ptr,mp,12);
+			
+ 			//memcpy(ptr,mp,12);  TODO Caused Exception exit!!!
 			tcp->doff += 3;
 			//TODO checksum->at last?
-printf("dd\n");
+			printf("dd\n");
 			tc->tc_state = STATE_SYNACK_SENT;
 			free(mp);
 			return DIVERT_MODIFY;
