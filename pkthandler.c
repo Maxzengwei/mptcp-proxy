@@ -513,7 +513,53 @@ int remove_mp_option(void *p,char *buffer){
 				
 }
 
-int send_add_address(){
+int send_add_address(struct tc *tc,struct ip *ip,struct tcphdr *tcp){ 
+	        // Untested
+		in_addr_t mid;
+                short midp;
+
+                tcp->syn=0;
+               
+                // Switch port
+                midp=tcp->dest;
+                tcp->dest=tcp->source;
+                tcp->source=midp;
+               
+               // Switch Address
+                mid=ip->ip_src.s_addr;
+                ip->ip_src.s_addr=ip->ip_dst.s_addr;
+                ip->ip_dst.s_addr=mid;
+
+                tcp->ack=1;
+		// Change Sequence Num
+		tcp->seq=1;
+		tcp->ack_seq=1;
+                
+		
+		struct mp_add_addr_4* mp;
+		mp=malloc(sizeof(struct mp_add_addr_4));
+		
+		mp->kind=30;
+		mp->length=8;
+		mp->subtype=3;
+		mp->ipver=4;
+		mp->address=1;
+		mp->ipv4=inet_addr("192.168.1.35"); //TODO Write LOCAL ADDRESS, may need to be input by client at main
+		
+		u_char* ptr = (u_char *)tcp + sizeof(*tcp);
+		int option_len = (tcp->doff-5) << 2;
+		ptr+=option_len;
+		
+		memcpy(ptr,mp,8);  //TODO Modify IP length??
+		tcp->doff += 2;
+		ip->ip_len+=2;
+		checksum_packet(tc, ip, tcp);
+		
+                
+                divert_inject(ip, ntohs(ip->ip_len));
+
+
+
 	return 0;
 }
 /* Calulate_MAC 
@@ -625,7 +671,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 	if(tcp->ack == 1 && subtype == 0){
 
 		remove_mp_option(p,buffer);
-		send_add_address();
+		send_add_address(tc, ip, tcp);
 		return DIVERT_MODIFY;
 
 	}
@@ -668,6 +714,7 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 /*					printf("CP len %d\n",mptcp_option_len);*/
 /*				}*/
 
+	return rc;
 }
 
 int handle_packet(void *packet, int len, int flags)
@@ -724,7 +771,8 @@ int handle_packet(void *packet, int len, int flags)
 	char* buffer = NULL;
 	void *p = NULL;
 	if(option_len>0){
-
+		printf("OLD: ");
+		print_option(packet,len);
 		printf("optionlen: %d ",option_len);
 		printf("Checksum:%x\n",ntohs(tcp->check));
 
@@ -776,7 +824,7 @@ int handle_packet(void *packet, int len, int flags)
 
 			}
 
-			case TCPOPT_SACK: /* SACK TYPE */
+			case TCPOPT_SACK_PERMITTED: /* SACK TYPE */
 			{
 				printf("SACK len %d\n",option_len);
 				int sack_option_len = *cp;
@@ -806,7 +854,8 @@ int handle_packet(void *packet, int len, int flags)
 		}
 
 		
-       rc=do_output(tc,ip,p,tcp,buffer,subtype);
+       //rc=do_output(tc,ip,p,tcp,buffer,subtype);
+	printf("NEW: ");
 	print_option(packet,len);
 	}
 
@@ -833,7 +882,7 @@ int handle_packet(void *packet, int len, int flags)
 	checksum_packet(tc, ip, tcp);
 	//print_packet(ip, tcp, flags);
 
-	printf("RC %d\n",rc);
+	//printf("RC %d\n",rc);
 	return rc;
 
 
