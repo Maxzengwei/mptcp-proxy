@@ -312,7 +312,7 @@ struct mp_add_addr_4{
 	unsigned char	subtype:4;	
 #endif
 	uint8_t		address;
-	uint32_t	ipv4; 
+	in_addr_t	ipv4; 
 };
 
 struct mp_add_addr_6{
