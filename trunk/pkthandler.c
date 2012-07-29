@@ -459,7 +459,7 @@ int Generate_Random_Key(struct tc *tc){
 
 	unsigned char key[8];
         int i;
-	unsigned char digest[8];
+	unsigned char digest[20];
         
         
 
@@ -492,7 +492,7 @@ int Generate_Random_Key(struct tc *tc){
 		
         for(i = 0; i < 4 ; i++)
         {
-		printf("I'm here abcd\n");
+		
         	tc->token_b[i]=tc->SHA[i];
         }
 
@@ -562,7 +562,7 @@ void Calulate_MAC(const char *key1, const char *key2, const char *rannum1, const
 
 
 int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
-	printf("SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
+	//printf("SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == TYPE_MP_CAPABLE){
 		struct mp_capable_12* mp = (struct mp_capable_12*)p;
 	
@@ -584,9 +584,8 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	}
 
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
-	int f=1;
-	//f=Generate_Random_Key(tc); TODO STACK SMASHED Problem!!
-        if (f==1)
+
+        if (Generate_Random_Key(tc))
 		{ //TODO
 			printf("EE\n");
 			struct mp_capable_12 *mp;
@@ -598,12 +597,14 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO Works Fine!!
 			printf("I'm here abcdefg\n");
 			printf("A again: %x %x\n",tc->key_a[0],tc->key_a[1]);
-  			struct mp_capable_12 *ptr = (struct mp_capable_12*)((unsigned long) tcp + tcp->doff<<2);
+  			u_char* ptr = (u_char *)tcp + sizeof(*tcp);
+			int option_len = (tcp->doff-5) << 2;
+			ptr+=option_len;
 			printf("size %d\n",sizeof(struct mp_capable_12));
 			
- 			//memcpy(ptr,mp,12);  TODO Caused Exception exit!!!
+ 			memcpy(ptr,mp,12);  //TODO Caused Exception exit!!!
 			tcp->doff += 3;
-			//TODO checksum->at last?
+			checksum_packet(tc, ip, tcp);
 			printf("dd\n");
 			tc->tc_state = STATE_SYNACK_SENT;
 			free(mp);
@@ -676,7 +677,7 @@ int handle_packet(void *packet, int len, int flags)
         struct tc *tc;
 	struct tcphdr *tcp;
 
-	int rc;
+	int rc=DIVERT_MODIFY;
 	if (ntohs(ip->ip_len) != len)
 		{
                        
@@ -830,7 +831,7 @@ int handle_packet(void *packet, int len, int flags)
 	//print_packet(ip, tcp, flags);
 
 
-	return DIVERT_MODIFY;
+	return rc;
 
 
 }
