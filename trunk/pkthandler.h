@@ -343,7 +343,7 @@ struct mp_remove_addr{
 };
 
 
-extern void print_packet(struct ip *ip, struct tcphdr *tcp, int flags);
+extern void print_packet(struct ip *ip, struct tcphdr *tcp, int flags, struct tc *tc);
 extern int  handle_packet(void *packet, int len, int flags);
 extern void     checksum_ip(struct ip *ip);
 extern void     checksum_tcp(struct tc *tc, struct ip *ip, struct tcphdr *tcp);
