@@ -111,7 +111,7 @@ static void put_connection(struct conn *c)
 
 
 
-void print_packet(struct ip *ip, struct tcphdr *tcp, int flags)
+void print_packet(struct ip *ip, struct tcphdr *tcp, int flags, struct tc *tc)
 {       
 
         
@@ -140,12 +140,13 @@ void print_packet(struct ip *ip, struct tcphdr *tcp, int flags)
         xprintf(XP_ALWAYS, "%s:%d",
                 inet_ntoa(ip->ip_src),
                 ntohs(tcp->source));
-        xprintf(XP_ALWAYS, "->%s:%d %d %s [%s]\n",
+        xprintf(XP_ALWAYS, "->%s:%d %d %s tc %p State %d\n",
                 inet_ntoa(ip->ip_dst),
                 ntohs(tcp->dest),
                 ntohs(ip->ip_len),
                 flagz,
-                flags & DF_IN ? "in" : "out");
+                tc,
+                tc->tc_state);
 }
 
 static void checksum_packet(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
@@ -201,6 +202,7 @@ static struct tc *do_lookup_connection_prev(struct sockaddr_in *src,
 static struct tc *lookup_connection_prev(struct ip *ip, struct tcphdr *tcp,
 				    	 int flags, struct conn **prev)
 {
+	struct tc *tc;
 	struct sockaddr_in addr[2];
 	int idx = flags & DF_IN ? 1 : 0;
 
@@ -209,7 +211,16 @@ static struct tc *lookup_connection_prev(struct ip *ip, struct tcphdr *tcp,
 	addr[!idx].sin_addr.s_addr = ip->ip_dst.s_addr;
 	addr[!idx].sin_port        = tcp->dest;
 
-	return do_lookup_connection_prev(&addr[0], &addr[1], prev);
+	tc=do_lookup_connection_prev(&addr[0], &addr[1], prev);
+        if (tc!=NULL)
+        	return tc;
+        else  
+		tc=do_lookup_connection_prev(&addr[1], &addr[0], prev);
+	
+        return tc;
+        
+	
+        
 }
 
 static struct tc *lookup_connection(struct ip *ip, struct tcphdr *tcp,int flags)
@@ -569,18 +580,20 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	}
 
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
-
+	
+	printf("I'm here abcd\n");
 		if(Generate_Random_Key(tc)){ //TODO
 			printf("EE\n");
-			struct mp_capable_12* mp = malloc(sizeof(*mp)); //free
+			struct mp_capable_12* mp = malloc(sizeof(struct mp_capable_12)); //free
 			mp->kind = 30;
 			mp->length = 12;
 			mp->subtype = TYPE_MP_CAPABLE;
-			mp->version = 0;
+			mp->version = 0;                        
 			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO key_b?
-	printf("A again: %x %x\n",tc->key_a[0],tc->key_a[1]);
+
+			printf("A again: %x %x\n",tc->key_a[0],tc->key_a[1]);
   			struct mp_capable_12 *ptr = (struct mp_capable_12*)((unsigned long) tcp + tcp->doff<<2);
-			printf("size %d\n",sizeof(*ptr));
+			printf("size %d\n",sizeof(struct mp_capable_12));
 			memcpy(ptr,mp,12);
 			tcp->doff += 3;
 			//TODO checksum->at last?
@@ -639,8 +652,8 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 
 	free(buffer);
 	
-	char *cp = p;
-	int mptcp_option_len = 12;
+	//char *cp = p;
+	//int mptcp_option_len = 12;
 /*				while(--mptcp_option_len>=0){*/
 /*					printf("%02x ",*cp++);				*/
 /*					printf("CP len %d\n",mptcp_option_len);*/
@@ -696,7 +709,7 @@ int handle_packet(void *packet, int len, int flags)
 	tc->tc_csum       = 0;
 
 
-
+	print_packet(ip, tcp, flags, tc);
  	int option_len = (tcp->doff-5) << 2;
 	int subtype = -1;	
 	char* buffer = NULL;
@@ -731,9 +744,10 @@ int handle_packet(void *packet, int len, int flags)
 	
 				option_len++;
 				while(--mptcp_option_len>=0){
-					printf("%02x ",*cp++);
+					//printf("%02x ",*cp++);
+                                        cp++;
 					option_len--;
-					printf("MP len %d\n",option_len);
+					//printf("MP len %d\n",option_len);
 				}
 				break;
 			}
@@ -782,7 +796,7 @@ int handle_packet(void *packet, int len, int flags)
 
 		}
 
-		print_option(packet,len);
+		//print_option(packet,len);
         rc=do_output(tc,ip,p,tcp,buffer,subtype);
 	}
 
@@ -806,7 +820,7 @@ int handle_packet(void *packet, int len, int flags)
         */
 
 	checksum_packet(tc, ip, tcp);
-//	print_packet(ip, tcp, flags);
+	//print_packet(ip, tcp, flags);
 
 
 	return DIVERT_MODIFY;
