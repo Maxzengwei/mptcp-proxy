@@ -13,7 +13,7 @@
 #endif
 
 #ifndef TCPOPT_SACK
-#define TCPOPT_SACK 	5
+#define TCPOPT_SACK 	4
 #endif
 
 #ifndef TCPOPT_MPTCP

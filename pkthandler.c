@@ -137,16 +137,16 @@ void print_packet(struct ip *ip, struct tcphdr *tcp, int flags, struct tc *tc)
         flagz[i] = 0;
 
         //strcpy(src, inet_ntoa(ip->ip_src));
-        xprintf(XP_ALWAYS, "%s:%d",
-                inet_ntoa(ip->ip_src),
-                ntohs(tcp->source));
-        xprintf(XP_ALWAYS, "->%s:%d %d %s tc %p State %d\n",
-                inet_ntoa(ip->ip_dst),
-                ntohs(tcp->dest),
-                ntohs(ip->ip_len),
-                flagz,
-                tc,
-                tc->tc_state);
+/*        xprintf(XP_ALWAYS, "%s:%d",*/
+/*                inet_ntoa(ip->ip_src),*/
+/*                ntohs(tcp->source));*/
+/*        xprintf(XP_ALWAYS, "->%s:%d %d %s tc %p State %d\n",*/
+/*                inet_ntoa(ip->ip_dst),*/
+/*                ntohs(tcp->dest),*/
+/*                ntohs(ip->ip_len),*/
+/*                flagz,*/
+/*                tc,*/
+/*                tc->tc_state);*/
 }
 
 static void checksum_packet(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
@@ -472,7 +472,7 @@ int Generate_Random_Key(struct tc *tc){
   		tc->key_b[i]=key[i];
                 
  	}
-
+	
 
         sha1_buffer(key, 8, digest); 
         printf("---------SHA-1---------------\n");
@@ -572,9 +572,9 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 
 		printf("KEY_A %x\n",mp->sender_key[0]);
 		printf("KEY_A %x\n",mp->sender_key[1]);
-		return DIVERT_ACCEPT;
+		return DIVERT_MODIFY;
 	}
-	return DIVERT_ACCEPT;
+	return DIVERT_MODIFY;
 }
 
 int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
@@ -600,6 +600,7 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
   			u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 			int option_len = (tcp->doff-5) << 2;
 			ptr+=option_len;
+			//u_char* ptr = (u_char *)(tcp + tcp->doff<<2);
 			printf("size %d\n",sizeof(struct mp_capable_12));
 			
  			memcpy(ptr,mp,12);  //TODO Caused Exception exit!!!
@@ -762,7 +763,7 @@ int handle_packet(void *packet, int len, int flags)
 
 			case TCPOPT_WSCALE: /* WSCALE TYPE */
 			{
-				//printf(" len %d\n",option_len);
+				printf("Wscale len %d\n",option_len);
 				int wscale_option_len = *cp;
 				cp--; /* back to first byte */
 				option_len++;
@@ -777,7 +778,7 @@ int handle_packet(void *packet, int len, int flags)
 
 			case TCPOPT_SACK: /* SACK TYPE */
 			{
-				//printf(" len %d\n",option_len);
+				printf("SACK len %d\n",option_len);
 				int sack_option_len = *cp;
 				cp--; /* back to first byte */
 				option_len++;
@@ -804,9 +805,11 @@ int handle_packet(void *packet, int len, int flags)
 
 		}
 
-		//print_option(packet,len);
-        rc=do_output(tc,ip,p,tcp,buffer,subtype);
+		
+       rc=do_output(tc,ip,p,tcp,buffer,subtype);
+	print_option(packet,len);
 	}
+
 
 	
 
@@ -830,7 +833,7 @@ int handle_packet(void *packet, int len, int flags)
 	checksum_packet(tc, ip, tcp);
 	//print_packet(ip, tcp, flags);
 
-
+	printf("RC %d\n",rc);
 	return rc;
 
 
