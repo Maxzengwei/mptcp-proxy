@@ -8,12 +8,12 @@
 #define TCPOPT_NOP  	1
 #endif
 
-#ifndef TCPOPT_WSCALE
-#define TCPOPT_WSCALE  	3
+#ifndef TCPOPT_WINDOW
+#define TCPOPT_WINDOW  	3
 #endif
 
-#ifndef TCPOPT_SACK
-#define TCPOPT_SACK 	4
+#ifndef TCPOPT_SACK_PERMITTED
+#define TCPOPT_SACK_PERMITTED 	4
 #endif
 
 #ifndef TCPOPT_MPTCP
