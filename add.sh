@@ -16,7 +16,8 @@ ee() {
 linux_set_iptables() {
     echo Tcpcrypting port 80 
     ee iptables -I FORWARD -p tcp -j NFQUEUE --queue-num 666
-    
+    ee iptables -I INPUT -p tcp -j NFQUEUE --queue-num 666
+    ee iptables -I OUTPUT -p tcp -j NFQUEUE --queue-num 666   
 }
 linux_unset_iptables() {
     echo Removing iptables rules and quitting tcpcryptd...

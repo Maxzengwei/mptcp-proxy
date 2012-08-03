@@ -57,7 +57,6 @@ static struct freelist		_free_free;
 static struct freelist		_free_tc;
 static struct freelist		_free_conn;
 
-
 static void *get_free(struct freelist *f, unsigned int sz)
 {
 	struct freelist *x = f->f_next;
@@ -249,8 +248,6 @@ static void tc_init(struct tc *tc)
 	tc->tc_mss_clamp    = 40; /* XXX */
 	tc->tc_sack_disable = 1;
 	tc->tc_rto	    = 100 * 1000; /* XXX */
-	
-
 
 }
 static void tc_finish(struct tc *tc)
@@ -420,7 +417,7 @@ int print_option(void *packet, int len)
  
 	int option_len = (tcp->doff-5) << 2;
 	
-	printf(" NEW option "); 
+	printf("NEW option "); 
 	while(--option_len>=0){
 
 
@@ -441,20 +438,11 @@ MACA = (result, 20);
 
 void Generate_Random_Num(char *result, int len)
 {	
-	int i;
-	
+	int i;	
  	for(i = 0; i < len; i++)
- 	{
-  		result[i] = rand() % 256;
-  		
-                
- 	}
-
-
-
-
-
+		result[i] = rand() % 256;
 }
+
 int Generate_Random_Key(struct tc *tc){
 
 	unsigned char key[8];
@@ -502,7 +490,7 @@ int Generate_Random_Key(struct tc *tc){
 int remove_mp_option(void *p,char *buffer){
 	char* cp = (char *)p;
 	if(buffer){
-		int len = sizeof(*buffer);
+		int len = buffer[1];
 		while(--len>=0){
 			*cp = 0x01;
 			*cp++;				
@@ -608,7 +596,7 @@ void Calulate_MAC(const char *key1, const char *key2, const char *rannum1, const
 
 
 int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
-	//printf("SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
+	printf("\nIDLE: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == TYPE_MP_CAPABLE){
 		struct mp_capable_12* mp = (struct mp_capable_12*)p;
 	
@@ -616,14 +604,12 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		memcpy(tc->key_a, mp->sender_key,sizeof(tc->key_a));
 		tc->tc_state = STATE_SYN_SENT;
 
-		printf("KEY_A %x\n",mp->sender_key[0]);
-		printf("KEY_A %x\n",mp->sender_key[1]);
-		return DIVERT_MODIFY;
 	}
 	return DIVERT_MODIFY;
 }
 
 int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+	printf("\nSYN SENT: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == TYPE_MP_CAPABLE){
 		tc->tc_state = STATE_PROXY_OFF;
 		return DIVERT_ACCEPT;
@@ -633,28 +619,30 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
         if (Generate_Random_Key(tc))
 		{ //TODO
-			printf("EE\n");
+			
 			struct mp_capable_12 *mp;
 			mp = malloc(sizeof(struct mp_capable_12)); //free
 			mp->kind = 30;
 			mp->length = 12;
 			mp->subtype = TYPE_MP_CAPABLE;
-			mp->version = 0;                        
-			memcpy(mp->sender_key,tc->token_b,sizeof(mp->sender_key));//TODO Works Fine!!
-			printf("I'm here abcdefg\n");
-			printf("A again: %x %x\n",tc->key_a[0],tc->key_a[1]);
+			mp->version = 0;   
+			mp->reserved = 0x81;                     
+			memcpy(mp->sender_key,tc->key_b,sizeof(mp->sender_key));//TODO Works Fine!!
+			
+		
   			u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 			int option_len = (tcp->doff-5) << 2;
 			ptr+=option_len;
-			//u_char* ptr = (u_char *)(tcp + tcp->doff<<2);
-			printf("size %d\n",sizeof(struct mp_capable_12));
-			
  			memcpy(ptr,mp,12);  //TODO Caused Exception exit!!!
+	
+
 			tcp->doff += 3;
+			ip->ip_len = htons(ntohs(ip->ip_len)+12);
+			
 			checksum_packet(tc, ip, tcp);
-			printf("dd\n");
 			tc->tc_state = STATE_SYNACK_SENT;
 			free(mp);
+			printf("INSERT MP\n");
 			return DIVERT_MODIFY;
 		}
 	}
@@ -663,13 +651,14 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 
 int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+	printf("\nACK: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->ack == 1 && subtype == -1){
 		tc->tc_state = STATE_PROXY_OFF;
 		return DIVERT_ACCEPT;
 	}
 
 	if(tcp->ack == 1 && subtype == 0){
-
+		printf("REMOVE\n");
 		remove_mp_option(p,buffer);
 		send_add_address(tc, ip, tcp);
 		return DIVERT_MODIFY;
@@ -707,6 +696,7 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 
 	free(buffer);
 	
+	return rc;
 	//char *cp = p;
 	//int mptcp_option_len = 12;
 /*				while(--mptcp_option_len>=0){*/
@@ -809,9 +799,8 @@ int handle_packet(void *packet, int len, int flags)
 				break;
 			}
 
-			case TCPOPT_WSCALE: /* WSCALE TYPE */
+			case TCPOPT_WINDOW: /* WSCALE TYPE */
 			{
-				printf("Wscale len %d\n",option_len);
 				int wscale_option_len = *cp;
 				cp--; /* back to first byte */
 				option_len++;
@@ -826,7 +815,6 @@ int handle_packet(void *packet, int len, int flags)
 
 			case TCPOPT_SACK_PERMITTED: /* SACK TYPE */
 			{
-				printf("SACK len %d\n",option_len);
 				int sack_option_len = *cp;
 				cp--; /* back to first byte */
 				option_len++;
@@ -844,7 +832,6 @@ int handle_packet(void *packet, int len, int flags)
 				int leng = (int)*cp-1;
 				cp+=leng;
 				option_len-=leng;
-			//	printf(" ");
 			
 				break;
 			
@@ -853,9 +840,8 @@ int handle_packet(void *packet, int len, int flags)
 
 		}
 
-		
-       //rc=do_output(tc,ip,p,tcp,buffer,subtype);
-	printf("NEW: ");
+      	rc=do_output(tc,ip,p,tcp,buffer,subtype);
+
 	print_option(packet,len);
 	}
 
@@ -882,7 +868,6 @@ int handle_packet(void *packet, int len, int flags)
 	checksum_packet(tc, ip, tcp);
 	//print_packet(ip, tcp, flags);
 
-	//printf("RC %d\n",rc);
 	return rc;
 
 

@@ -23,7 +23,9 @@ linux_set_iptables() {
 
 linux_unset_iptables() {
     ee iptables -D FORWARD -p tcp -j NFQUEUE --queue-num 666
-    
+    ee iptables -D INPUT -p tcp -j NFQUEUE --queue-num 666
+    ee iptables -D OUTPUT -p tcp -j NFQUEUE --queue-num 666
+
 }
 check_root() {
     if [ `whoami` != "root" ]
