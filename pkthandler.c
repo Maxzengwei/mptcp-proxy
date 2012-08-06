@@ -40,6 +40,7 @@ struct conn {
 
 /* XXX someone that knows what they're doing code a proper hash table */
 static struct conn *_connection_map[65536];
+typedef int (*opt_cb)(struct tc *tc, int tcpop, int subop, int len, void *data);
 
 struct freelist {
 	void		*f_obj;
@@ -136,16 +137,17 @@ void print_packet(struct ip *ip, struct tcphdr *tcp, int flags, struct tc *tc)
         flagz[i] = 0;
 
         //strcpy(src, inet_ntoa(ip->ip_src));
-/*        xprintf(XP_ALWAYS, "%s:%d",*/
-/*                inet_ntoa(ip->ip_src),*/
-/*                ntohs(tcp->source));*/
-/*        xprintf(XP_ALWAYS, "->%s:%d %d %s tc %p State %d\n",*/
-/*                inet_ntoa(ip->ip_dst),*/
-/*                ntohs(tcp->dest),*/
-/*                ntohs(ip->ip_len),*/
-/*                flagz,*/
-/*                tc,*/
-/*                tc->tc_state);*/
+	
+       xprintf(XP_ALWAYS, "\n\n%s:%d",
+                inet_ntoa(ip->ip_src),
+                ntohs(tcp->source));
+       xprintf(XP_ALWAYS, "->%s:%d %d %s tc %p State %d\n",
+                inet_ntoa(ip->ip_dst),
+                ntohs(tcp->dest),
+                ntohs(ip->ip_len),
+                flagz,
+                tc,
+               tc->tc_state);
 }
 
 static void checksum_packet(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
@@ -426,6 +428,387 @@ int print_option(void *packet, int len)
 	printf("\n");
 }
 
+static void set_ip_len(struct ip *ip, unsigned short len)
+{
+	unsigned short old = ntohs(ip->ip_len);
+	int diff;
+	int sum;
+
+	ip->ip_len = htons(len);
+
+	diff	   = len - old;
+	sum  	   = ntohs(~ip->ip_sum);
+	sum 	  += diff;
+	sum	   = (sum >> 16) + (sum & 0xffff);
+	sum	  += (sum >> 16);
+	ip->ip_sum = htons(~sum);
+}
+static void *tcp_data(struct tcphdr *tcp)
+{
+	return (char*) tcp + (tcp->doff << 2);
+}
+
+static int tcp_data_len(struct ip *ip, struct tcphdr *tcp)
+{
+	int hl = (ip->ip_hl << 2) + (tcp->doff << 2);
+
+	return ntohs(ip->ip_len) - hl;
+}
+
+static void *find_opt(struct tcphdr *tcp, unsigned char opt)
+{
+	unsigned char *p = (unsigned char*) (tcp + 1);
+	int len = (tcp->doff << 2 ) - sizeof(*tcp);
+	int o, l;
+
+	assert(len >= 0);
+
+	while (len > 0) {
+		if (*p == opt) {
+			if (*(p + 1) > len) {
+				xprintf(XP_ALWAYS, "fek\n");
+				return NULL;
+			}
+
+			return p;
+		}
+
+		o = *p++;
+		len--;
+
+		switch (o) {
+		case TCPOPT_EOL:
+		case TCPOPT_NOP:
+			continue;
+		}
+
+		if (!len) {
+			xprintf(XP_ALWAYS, "fuck\n");
+			return NULL;
+		}
+
+		l = *p++;
+		len--;
+		if (l > (len + 2) || l < 2) {
+			xprintf(XP_ALWAYS, "fuck2 %d %d\n", l, len);
+			return NULL;
+		}
+
+		p += l - 2;
+		len -= l - 2;
+	}
+	assert(len == 0);
+
+	return NULL;
+}
+
+static struct tc_subopt *find_subopt(struct tcphdr *tcp, unsigned char op)
+{
+	struct tcpopt *toc;
+	struct tc_subopt *tcs;
+	int len;
+	int optlen;
+
+	toc = find_opt(tcp, 30);
+	if (!toc)
+		return NULL;
+
+	len = toc->toc_len - sizeof(*toc);
+	assert(len >= 0);
+
+	if (len == 0 && op == 0)
+		return (struct tc_subopt*) 0xbad;
+
+	tcs = &toc->toc_opts[0];
+	while (len > 0) {
+		if (len < 1)
+			return NULL;
+
+		if (tcs->tcs_op <= 0x3f)
+			optlen = 1;
+		else if (tcs->tcs_op >= 0x80) {
+			switch (tcs->tcs_op) {
+			case 0:
+			case 1:
+				optlen = 10;
+				break;
+
+			case 2:
+				/* XXX depends on cipher */
+				optlen = 12;
+				break;
+
+			default:
+				errx(1, "Unknown option %d", tcs->tcs_op);
+				break;
+			}
+		} else
+			optlen = tcs->tcs_len;
+
+		if (optlen > len)
+			return NULL;
+
+		if (tcs->tcs_op == op)
+			return tcs;
+
+		len -= optlen;
+		tcs = (struct tc_subopt*) ((unsigned long) tcs + optlen);
+	}
+	assert(len == 0);
+
+	return NULL;
+}
+
+
+
+static int foreach_subopt(struct tc *tc, int len, void *data, opt_cb cb)
+{
+	struct tc_subopt *tcs = (struct tc_subopt*) data;
+	int optlen = 0;
+	unsigned char *d;
+
+	assert(len >= 0);
+
+	if (len == 0)
+		return cb(tc, -1, 0, optlen, tcs);
+
+	while (len > 0) {
+		d = (unsigned char *) tcs;
+
+		if (len < 1)
+			goto __bad;
+
+		if (tcs->tcs_op <= 0x3f)
+			optlen = 1;
+		else if (tcs->tcs_op >= 0x80) {
+			d++;
+			switch (tcs->tcs_op) {
+			case 0:
+			case 1:
+				optlen = 10;
+				break;
+
+			case 2:
+				/* XXX depends on cipher */
+				optlen = 12;
+				break;
+
+			default:
+				errx(1, "Unknown option %d", tcs->tcs_op);
+				break;
+			}
+		} else {
+			if (len < 2)
+				goto __bad;
+			optlen = tcs->tcs_len;
+			d = tcs->tcs_data;
+		}
+
+		if (optlen > len)
+			goto __bad;
+
+		if (cb(tc, -1, tcs->tcs_op, optlen, d))
+			return 1;
+
+		len -= optlen;
+		tcs  = (struct tc_subopt*) ((unsigned long) tcs + optlen);
+	}
+
+	assert(len == 0);
+
+	return 0;
+__bad:
+	xprintf(XP_ALWAYS, "bad\n");
+	return 1;
+}
+
+static void foreach_opt(struct tc *tc, struct tcphdr *tcp, opt_cb cb)
+{
+	unsigned char *p = (unsigned char*) (tcp + 1);
+	int len = (tcp->doff << 2) - sizeof(*tcp);
+	int o, l;
+
+	assert(len >= 0);
+
+	while (len > 0) {
+		o = *p++;
+		len--;
+
+		switch (o) {
+		case TCPOPT_EOL:
+		case TCPOPT_NOP:
+			continue; /* XXX optimize */
+			l = 0;
+			break;
+
+		default:
+			if (!len) {
+				xprintf(XP_ALWAYS, "fuck\n");
+				return;
+			}
+			l = *p++;
+			len--;
+			if (l < 2 || l > (len + 2)) {
+				xprintf(XP_ALWAYS, "fuck2 %d %d\n", l, len);
+				return;
+			}
+			l -= 2;
+			break;
+		}
+
+		if (o == 0) {
+			if (foreach_subopt(tc, l, p, cb))
+				return;
+		} else {
+			if (cb(tc, o, -1, l, p))
+				return;
+		}
+
+		p   += l;
+		len -= l;
+	}
+	assert(len == 0);
+}
+
+static int do_ops_len(struct tc *tc, int tcpop, int subop, int len, void *data)
+{
+	tc->tc_optlen += len + 2;
+
+	return 0;
+}
+
+static int tcp_ops_len(struct tc *tc, struct tcphdr *tcp)
+{
+	int nops   = 40;
+	uint8_t *p = (uint8_t*) (tcp + 1);
+
+	tc->tc_optlen = 0;
+
+	foreach_opt(tc, tcp, do_ops_len);
+
+	nops -= tc->tc_optlen;
+	p    += tc->tc_optlen;
+
+	assert(nops >= 0);
+
+	while (nops--) {
+		if (*p != TCPOPT_NOP && *p != TCPOPT_EOL)
+			return (tcp->doff << 2) - 20;
+
+		p++;
+	}
+
+	return tc->tc_optlen;
+}
+
+static void *tcp_opts_alloc(struct tc *tc, struct ip *ip, struct tcphdr *tcp,
+			    int len)
+{
+	int opslen = (tcp->doff << 2) + len;
+	int pad = opslen % 4;
+	char *p;
+	int dlen = ntohs(ip->ip_len) - (ip->ip_hl << 2) - (tcp->doff << 2);
+	int ol = (tcp->doff << 2) - sizeof(*tcp);
+
+	assert(len);
+
+	/* find space in tail if full of nops */
+	if (ol == 40) {
+		ol = tcp_ops_len(tc, tcp);
+		assert(ol <= 40);
+
+		if (40 - ol >= len)
+			return (uint8_t*) (tcp + 1) + ol;
+	}
+
+	if (pad)
+		len += 4 - pad;
+
+	if (ntohs(ip->ip_len) + len > tc->tc_mtu)
+		return NULL;
+
+	p = (char*) tcp + (tcp->doff << 2);
+	memmove(p + len, p, dlen);
+	memset(p, 0, len);
+
+	assert(((tcp->doff << 2) + len) <= 60);
+
+	set_ip_len(ip, ntohs(ip->ip_len) + len);
+	tcp->doff+= len >> 2;
+
+	return p;
+}
+
+static struct tc_subopt *subopt_alloc(struct tc *tc, struct ip *ip,
+				      struct tcphdr *tcp, int len)
+{
+	struct tcpopt *toc;
+
+	len += sizeof(*toc);
+	toc = tcp_opts_alloc(tc, ip, tcp, len);
+	if (!toc)
+		return NULL;
+
+	toc->toc_kind = 30;
+	toc->toc_len  = len;
+
+	return toc->toc_opts;
+}
+
+static int sack_disable(struct tc *tc, struct tcphdr *tcp)
+{
+	struct {
+		uint8_t	kind;
+		uint8_t len;
+	} *sack;
+
+	sack = find_opt(tcp, TCPOPT_SACK_PERMITTED);
+	if (!sack)
+		return DIVERT_ACCEPT;
+
+	memset(sack, TCPOPT_NOP, sizeof(*sack));
+
+	return DIVERT_MODIFY;
+}
+
+static int mptcp_remove(struct tc *tc, struct tcphdr *tcp)
+{
+	struct {
+		uint8_t	kind;
+		uint8_t len;
+	} *mp;
+
+	mp = find_opt(tcp, TCPOPT_MPTCP);
+	if (!mp)
+		return DIVERT_ACCEPT;
+
+	memset(mp, TCPOPT_NOP, mp->len);
+
+	return DIVERT_MODIFY;
+}
+
+static int ws_disable(struct tc *tc, struct tcphdr *tcp)
+{
+	struct {
+		uint8_t	kind;
+		uint8_t len;
+	} *ws;
+
+	ws = find_opt(tcp, TCPOPT_WINDOW);
+	if (!ws)
+		return TCPOPT_WINDOW;
+
+	memset(ws, TCPOPT_NOP, ws->len);
+
+	return DIVERT_MODIFY;
+}
+
+static struct tc *find_esttc(struct tc *tc)
+{
+	return tc;
+
+} 
+
 /* Generate Random Num 
 
 PASS the array and the length in
@@ -499,6 +882,26 @@ int remove_mp_option(void *p,char *buffer){
 	}
 	return 0;
 				
+}
+
+void header_switch(struct ip *ip, struct tcphdr *tcp)
+{
+		in_addr_t mid;
+                short midp;
+
+	
+               
+                // Switch port
+                midp=tcp->dest;
+                tcp->dest=tcp->source;
+                tcp->source=midp;
+               
+               // Switch Address
+                mid=ip->ip_src.s_addr;
+                ip->ip_src.s_addr=ip->ip_dst.s_addr;
+                ip->ip_dst.s_addr=mid;
+
+
 }
 
 int send_add_address(struct tc *tc,struct ip *ip,struct tcphdr *tcp){ 
@@ -605,6 +1008,70 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		tc->tc_state = STATE_SYN_SENT;
 
 	}
+	if(tcp->syn == 1 && tcp->ack == 0 && subtype == 1){ //MP JOIN
+	
+		unsigned char randomnum[4];
+		unsigned char mac[20];
+		Generate_Random_Num(randomnum,4);
+		
+		struct mp_join_12* mp = (struct mp_join_12*)p;
+		memcpy(tc->token_b, mp->receiver_token, 4);
+
+		/* Linked list find the established tc */
+		struct tc *esttc=find_esttc(tc);
+		if (esttc)
+		{
+			tc->tc_state=STATE_SUB_SYNACK_SENT;
+			memcpy(tc->key_a,esttc->key_a,8);
+			memcpy(tc->key_b,esttc->key_b,8);
+			memcpy(tc->token_b,esttc->token_b,4);
+			Calulate_MAC(tc->key_b, tc->key_a, randomnum, mp->sender_number, mac);
+			header_switch(ip,tcp);
+
+			struct mp_join_16 *mpj=malloc(sizeof (struct mp_join_16));
+			mpj->kind=30;
+			mpj->length=16;
+			mpj->subtype=1;
+			mpj->address=mp->address;
+			memcpy(mpj->sender_mac,mac,8);
+			memcpy(mpj->sender_number,randomnum,8);
+			memcpy(p,mpj,16);
+			tcp->syn=1;
+                	tcp->ack=1;
+			
+			set_ip_len(ip, ntohs(ip->ip_len)+4);
+			tcp->doff+= 4 >> 2;
+			
+			checksum_packet(tc, ip, tcp);
+			divert_inject(ip, ntohs(ip->ip_len));
+			
+			return DIVERT_DROP;
+			
+
+			
+			
+		}
+		else 
+		{	
+		
+			header_switch(ip, tcp);
+			tcp->syn=0;
+                	tcp->rst=1;
+
+                	//print_packet(ip, tcp, flags);
+                	checksum_packet(tc, ip, tcp);
+                	divert_inject(ip, ntohs(ip->ip_len));
+                	return DIVERT_DROP;
+                }
+			
+			
+
+		
+		
+	
+	}
+
+
 	return DIVERT_MODIFY;
 }
 
@@ -629,7 +1096,10 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 			mp->reserved = 0x81;                     
 			memcpy(mp->sender_key,tc->key_b,sizeof(mp->sender_key));//TODO Works Fine!!
 			
-		
+			
+			//struct tcpopt *toc;
+			//toc=tcp_opts_alloc(tc, ip, tcp, TCPOPT_MPTCP);
+			
   			u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 			int option_len = (tcp->doff-5) << 2;
 			ptr+=option_len;
@@ -652,21 +1122,54 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
 	printf("\nACK: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
-	if(tcp->ack == 1 && subtype == -1){
-		tc->tc_state = STATE_PROXY_OFF;
-		return DIVERT_ACCEPT;
-	}
 
-	if(tcp->ack == 1 && subtype == 0){
-		printf("REMOVE\n");
-		remove_mp_option(p,buffer);
-		send_add_address(tc, ip, tcp);
+
+	if(tcp->syn ==0 && tcp->ack == 1 && subtype == 0){
+		printf("----REMOVE----------\n");
+		mptcp_remove(tc, tcp);
+		
+		tcp->doff = tcp->doff - 5;
+		ip->ip_len = htons(ntohs(ip->ip_len)-20);
+		
+		tc->tc_state = STATE_INITEST;
+		
+		//send_add_address(tc, ip, tcp);
 		return DIVERT_MODIFY;
 
+	}
+	if(tcp->syn ==0 && tcp->ack == 1 && subtype == -1){
+		tc->tc_state = STATE_PROXY_OFF;
+		return DIVERT_ACCEPT;
 	}
 	return DIVERT_ACCEPT;
 }
 
+int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
+
+	if(tcp->ack == 1 && subtype == -1){
+		tc->tc_state = STATE_PROXY_OFF;
+		header_switch(ip, tcp);
+		tcp->syn=0;
+		tcp->ack=0;
+                tcp->rst=1;
+
+                //print_packet(ip, tcp, flags);
+                checksum_packet(tc, ip, tcp);
+                divert_inject(ip, ntohs(ip->ip_len));
+
+		
+		return DIVERT_DROP;
+	}
+	if (tcp->ack==1 && subtype==1)
+	{
+		struct mp_join_24 *mp= (struct mp_join_24*)p;
+		// Send ACK with DATA ACK
+		return DIVERT_DROP;
+
+	}
+	return DIVERT_DROP;
+
+}
 int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
 
 	int rc = DIVERT_ACCEPT;
@@ -683,11 +1186,20 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 	case(STATE_SYNACK_SENT):
 		rc = do_output_synack_sent(tc,ip,p,tcp,buffer,subtype);
 		break;	
+	
+	case(STATE_SUB_SYNACK_SENT):
+		rc = do_output_sub_synack_sent(tc,ip,p,tcp,buffer,subtype);
+		break;
 
 
 	case(STATE_PROXY_OFF):
 		rc = DIVERT_ACCEPT;
 		break;
+	
+	case(STATE_INITEST):
+		rc = DIVERT_ACCEPT;
+		break;
+
 	
 	default:
 		xprintf(XP_ALWAYS,"Unknown state %d\n",tc->tc_state);
@@ -756,95 +1268,48 @@ int handle_packet(void *packet, int len, int flags)
 
 
 	print_packet(ip, tcp, flags, tc);
- 	int option_len = (tcp->doff-5) << 2;
+  	int option_len = (tcp->doff-5) << 2;
 	int subtype = -1;	
 	char* buffer = NULL;
 	void *p = NULL;
+	struct tcpopt *toc;
+	
+
+
 	if(option_len>0){
-		printf("OLD: ");
-		print_option(packet,len);
+
 		printf("optionlen: %d ",option_len);
 		printf("Checksum:%x\n",ntohs(tcp->check));
 
-		u_char* cp = (u_char *)tcp + sizeof(*tcp);
+		//u_char* cp = (u_char *)tcp + sizeof(*tcp);
 		
-		while(--option_len>=0 ){
-			switch (*cp++){
-			case TCPOPT_NOP:	/* NOP TYPE */
-			{
-				//printf("oplen %d\n",option_len);
-				break;
-			}
+	printf("OLD TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);	
+	sack_disable(tc,tcp);
+	ws_disable(tc,tcp);
+	toc=find_opt(tcp, TCPOPT_MPTCP);
+	if (toc){
 
-
-			case TCPOPT_MPTCP: /* MPTCP TYPE */
-			{
-				int mptcp_option_len = *cp;
-				cp--; /* back to first byte */
-				p = cp;
-				buffer = malloc(mptcp_option_len);
-				memcpy(buffer,cp,mptcp_option_len);
-				subtype = (buffer[2]&0xf0)>>4;
-				printf("mp option len %d Subtype %d\n",mptcp_option_len,subtype);
-//			printf("KIND %x LENGTH %x SUBTYPE %x version %x Flag %x \n",mp->kind,mp->length,mp->subtype,mp->version, mp->reserved);
-		
+	p=toc;
+	unsigned int mptcp_option_len=toc->toc_len;		
 	
-				option_len++;
-				while(--mptcp_option_len>=0){
-					//printf("%02x ",*cp++);
-                                        cp++;
-					option_len--;
-					//printf("MP len %d\n",option_len);
-				}
-				break;
-			}
-
-			case TCPOPT_WINDOW: /* WSCALE TYPE */
-			{
-				int wscale_option_len = *cp;
-				cp--; /* back to first byte */
-				option_len++;
-				while(--wscale_option_len>=0){
-					*cp = 0x01;
-					*cp++;
-					option_len--;
-				}
-				break;
-
-			}
-
-			case TCPOPT_SACK_PERMITTED: /* SACK TYPE */
-			{
-				int sack_option_len = *cp;
-				cp--; /* back to first byte */
-				option_len++;
-				while(--sack_option_len>=0){
-					*cp = 0x01;
-					*cp++;
-					option_len--;
-				}
-				break;
-
-			}
-			default: /* Jump To Next Option Type */
-				
-				printf("");
-				int leng = (int)*cp-1;
-				cp+=leng;
-				option_len-=leng;
-			
-				break;
-			
-			}
-
-
-		}
-
-      	rc=do_output(tc,ip,p,tcp,buffer,subtype);
-
-	print_option(packet,len);
+	buffer = malloc(mptcp_option_len);
+	memcpy(buffer,p,mptcp_option_len);
+	subtype = (buffer[2]&0xf0)>>4;
+	printf("---%d, %d---", mptcp_option_len, subtype);
 	}
+	/*if (tc->tc_state==STATE_PROXY_OFF)
+	{
+		printf("I'm here abcdefg\n");		
+		return DIVERT_MODIFY;
+	}*/	
 
+
+
+        rc=do_output(tc,ip,p,tcp,buffer,subtype);
+	printf("NEW: ");
+	print_option(packet,len);
+	printf("NEW TCP Header Length: %d, Option length %d  ", tcp->doff << 2, (tcp->doff-5) << 2);
+	}
 
 	
 

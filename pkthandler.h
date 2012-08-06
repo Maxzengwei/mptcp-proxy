@@ -36,7 +36,11 @@ enum {
 	STATE_IDLE = 0,
 	STATE_SYN_SENT,
 	STATE_PROXY_OFF,
-	STATE_SYNACK_SENT,
+	STATE_SYNACK_SENT,	
+	STATE_SUB_SYNACK_SENT,
+	STATE_INITEST,
+	STATE_JOINED,
+
 };
 
 enum {
@@ -150,8 +154,8 @@ struct mp_join_12{
 	unsigned char	subtype:4;
 #endif
 	uint8_t		address;
-	uint32_t	receiver_token;
-	uint32_t	sender_number;
+	unsigned char	receiver_token[4];
+	unsigned char	sender_number[4];
 };
 
 struct mp_join_16{
@@ -167,8 +171,8 @@ struct mp_join_16{
 	unsigned char	subtype:4;
 #endif
 	uint8_t		address;
-	uint64_t	sender_mac;
-	uint32_t	sender_number;
+	unsigned char	sender_mac[8];
+	unsigned char	sender_number[4];
 };
 
 struct mp_join_24{
@@ -340,6 +344,18 @@ struct mp_remove_addr{
 	unsigned char	subtype:4;
 #endif
 	uint8_t 	id; //TODO check number of bits
+};
+
+struct tc_subopt {
+	uint8_t	tcs_op;
+	uint8_t	tcs_len;
+	uint8_t	tcs_data[0];
+};
+
+struct tcpopt{
+	uint8_t		 toc_kind;
+	uint8_t		 toc_len;
+	struct tc_subopt toc_opts[0];
 };
 
 
