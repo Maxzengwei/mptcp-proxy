@@ -32,6 +32,10 @@
 #include "sha1.h"
 #include "pkthandler.h"
 
+
+//TODO UNION 
+
+
 struct conn {
 	struct sockaddr_in	c_addr[2];
 	struct tc		*c_tc;
@@ -905,49 +909,49 @@ void header_switch(struct ip *ip, struct tcphdr *tcp)
 }
 
 int send_add_address(struct tc *tc,struct ip *ip,struct tcphdr *tcp){ 
-	        // Untested
-		in_addr_t mid;
-                short midp;
+/*	        // Untested*/
+/*		in_addr_t mid;*/
+/*                short midp;*/
 
-                tcp->syn=0;
-               
-                // Switch port
-                midp=tcp->dest;
-                tcp->dest=tcp->source;
-                tcp->source=midp;
-               
-               // Switch Address
-                mid=ip->ip_src.s_addr;
-                ip->ip_src.s_addr=ip->ip_dst.s_addr;
-                ip->ip_dst.s_addr=mid;
+/*                tcp->syn=0;*/
+/*               */
+/*                // Switch port*/
+/*                midp=tcp->dest;*/
+/*                tcp->dest=tcp->source;*/
+/*                tcp->source=midp;*/
+/*               	*/
+/*               // Switch Address*/
+/*                mid=ip->ip_src.s_addr;*/
+/*                ip->ip_src.s_addr=ip->ip_dst.s_addr;*/
+/*                ip->ip_dst.s_addr=mid;*/
 
-                tcp->ack=1;
-		// Change Sequence Num
-		tcp->seq=1;
-		tcp->ack_seq=1;
-                
-		
-		struct mp_add_addr_4* mp;
-		mp=malloc(sizeof(struct mp_add_addr_4));
-		
-		mp->kind=30;
-		mp->length=8;
-		mp->subtype=3;
-		mp->ipver=4;
-		mp->address=1;
-		mp->ipv4=inet_addr("192.168.1.35"); //TODO Write LOCAL ADDRESS, may need to be input by client at main
-		
-		u_char* ptr = (u_char *)tcp + sizeof(*tcp);
-		int option_len = (tcp->doff-5) << 2;
-		ptr+=option_len;
-		
-		memcpy(ptr,mp,8);  //TODO Modify IP length??
-		tcp->doff += 2;
-		ip->ip_len+=2;
-		checksum_packet(tc, ip, tcp);
-		
-                
-                divert_inject(ip, ntohs(ip->ip_len));
+/*                tcp->ack=1;*/
+/*		// Change Sequence Num*/
+/*		tcp->seq=1;*/
+/*		tcp->ack_seq=1;*/
+/*                */
+/*		*/
+/*		struct mp_add_addr_4* mp;*/
+/*		mp=malloc(sizeof(struct mp_add_addr_4));*/
+/*		*/
+/*		mp->kind=30;*/
+/*		mp->length=8;*/
+/*		mp->subtype=3;*/
+/*		mp->ipver=4;*/
+/*		mp->address=1;*/
+/*		mp->ipv4=inet_addr("192.168.1.35"); //TODO Write LOCAL ADDRESS, may need to be input by client at main*/
+/*		*/
+/*		u_char* ptr = (u_char *)tcp + sizeof(*tcp);*/
+/*		int option_len = (tcp->doff-5) << 2;*/
+/*		ptr+=option_len;*/
+/*		*/
+/*		memcpy(ptr,mp,8);  //TODO Modify IP length??*/
+/*		tcp->doff += 2;*/
+/*		ip->ip_len= ntohs2;*/
+/*		checksum_packet(tc, ip, tcp);*/
+/*		*/
+/*                */
+/*                divert_inject(ip, ntohs(ip->ip_len));*/
 
 
 
@@ -989,9 +993,6 @@ void Calulate_MAC(const char *key1, const char *key2, const char *rannum1, const
 
         }
 
-        
-
-
 	hmac_sha1(key, 16, in, 8, result);	
 
 
@@ -1002,8 +1003,6 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 	printf("\nIDLE: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == TYPE_MP_CAPABLE){
 		struct mp_capable_12* mp = (struct mp_capable_12*)p;
-	
-		printf("mp size: %d, struct size: %d\n",sizeof(*mp),sizeof(struct mp_capable_12));
 		memcpy(tc->key_a, mp->sender_key,sizeof(tc->key_a));
 		tc->tc_state = STATE_SYN_SENT;
 
@@ -1084,17 +1083,17 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
 
-        if (Generate_Random_Key(tc))
-		{ //TODO
+        	if (Generate_Random_Key(tc))
+		{
 			
 			struct mp_capable_12 *mp;
-			mp = malloc(sizeof(struct mp_capable_12)); //free
+			mp = malloc(sizeof(struct mp_capable_12)); 
 			mp->kind = 30;
 			mp->length = 12;
 			mp->subtype = TYPE_MP_CAPABLE;
 			mp->version = 0;   
 			mp->reserved = 0x81;                     
-			memcpy(mp->sender_key,tc->key_b,sizeof(mp->sender_key));//TODO Works Fine!!
+			memcpy(mp->sender_key,tc->key_b,sizeof(mp->sender_key));
 			
 			
 			//struct tcpopt *toc;
@@ -1103,7 +1102,7 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
   			u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 			int option_len = (tcp->doff-5) << 2;
 			ptr+=option_len;
- 			memcpy(ptr,mp,12);  //TODO Caused Exception exit!!!
+ 			memcpy(ptr,mp,12);  
 	
 
 			tcp->doff += 3;
@@ -1112,7 +1111,6 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 			checksum_packet(tc, ip, tcp);
 			tc->tc_state = STATE_SYNACK_SENT;
 			free(mp);
-			printf("INSERT MP\n");
 			return DIVERT_MODIFY;
 		}
 	}
@@ -1146,6 +1144,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 
 int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
 
+
 	if(tcp->ack == 1 && subtype == -1){
 		tc->tc_state = STATE_PROXY_OFF;
 		header_switch(ip, tcp);
@@ -1170,6 +1169,24 @@ int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr 
 	return DIVERT_DROP;
 
 }
+int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer,int subtype){
+	printf("EST: Seq %d Ack %d\n", tcp->seq,tcp->ack_seq);
+
+	struct mp_dss_44 *mp = (struct mp_dss_44*)p;
+	if(subtype == 2 && mp->A && !mp->a && mp->M && !mp->m){	/* 32 bits */
+/*		if(ip->ip_src == */
+/*		*/
+/*		do_output_data_c2s();*/
+/*	*/
+/*		do_output_data_s2c();			*/
+		
+
+		
+	}
+
+	return DIVERT_MODIFY;
+}
+
 int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
 
 	int rc = DIVERT_ACCEPT;
@@ -1196,11 +1213,11 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 		rc = DIVERT_ACCEPT;
 		break;
 	
+
 	case(STATE_INITEST):
-		rc = DIVERT_ACCEPT;
+		rc = do_output_data(tc,ip,p,tcp,buffer,subtype);
 		break;
 
-	
 	default:
 		xprintf(XP_ALWAYS,"Unknown state %d\n",tc->tc_state);
 		break;
@@ -1208,14 +1225,6 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 
 	free(buffer);
 	
-	return rc;
-	//char *cp = p;
-	//int mptcp_option_len = 12;
-/*				while(--mptcp_option_len>=0){*/
-/*					printf("%02x ",*cp++);				*/
-/*					printf("CP len %d\n",mptcp_option_len);*/
-/*				}*/
-
 	return rc;
 }
 
@@ -1283,55 +1292,29 @@ int handle_packet(void *packet, int len, int flags)
 
 		//u_char* cp = (u_char *)tcp + sizeof(*tcp);
 		
-	printf("OLD TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);	
-	sack_disable(tc,tcp);
-	ws_disable(tc,tcp);
-	toc=find_opt(tcp, TCPOPT_MPTCP);
-	if (toc){
+		printf("OLD TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);	
+		sack_disable(tc,tcp);
+		ws_disable(tc,tcp);
+		toc=find_opt(tcp, TCPOPT_MPTCP);
+		if (toc){
 
-	p=toc;
-	unsigned int mptcp_option_len=toc->toc_len;		
-	
-	buffer = malloc(mptcp_option_len);
-	memcpy(buffer,p,mptcp_option_len);
-	subtype = (buffer[2]&0xf0)>>4;
-	printf("---%d, %d---", mptcp_option_len, subtype);
+			p=toc;
+			unsigned int mptcp_option_len=toc->toc_len;		
+		
+			buffer = malloc(mptcp_option_len);
+			memcpy(buffer,p,mptcp_option_len);
+			subtype = (buffer[2]&0xf0)>>4;
+			printf("---%d, %d---", mptcp_option_len, subtype);
+		}
 	}
-	/*if (tc->tc_state==STATE_PROXY_OFF)
-	{
-		printf("I'm here abcdefg\n");		
-		return DIVERT_MODIFY;
-	}*/	
 
+	
+	rc=do_output(tc,ip,p,tcp,buffer,subtype);	
+	checksum_packet(tc, ip, tcp);
 
-
-        rc=do_output(tc,ip,p,tcp,buffer,subtype);
 	printf("NEW: ");
 	print_option(packet,len);
 	printf("NEW TCP Header Length: %d, Option length %d  ", tcp->doff << 2, (tcp->doff-5) << 2);
-	}
-
-	
-
-	
-
-        
-        
-        /*if (flags & DF_IN)
-        	ip->ip_src.s_addr=inet_addr("128.16.10.31");
- 	else
-		ip->ip_dst.s_addr=inet_addr("128.16.10.31");
-        
-        */
-        //divert_inject(ip, ntohs(ip->ip_len));
-        
-        /*if (tc->tc_tcp_state == TCPSTATE_DEAD
-	    || tc->tc_state  == STATE_DISABLED)
-		remove_connection(ip, tcp, flags);
-        */
-
-	checksum_packet(tc, ip, tcp);
-	//print_packet(ip, tcp, flags);
 
 	return rc;
 
