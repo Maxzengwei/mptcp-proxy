@@ -137,7 +137,7 @@ struct mp_capable_20{
 	unsigned char	version:4;
 	unsigned char	subtype:4;
 #endif
-	uint8_t		reserved:8;
+	uint8_t		reserved;
 	unsigned char	sender_key[8];
 	unsigned char 	receiver_key[8];
 };
@@ -240,8 +240,8 @@ struct mp_dss_88{
 	unsigned char	F:1;
 	unsigned char	reserved:3;
 #endif
-	uint64_t	data_ack;
-	uint64_t	data_seq;
+	unsigned char	data_ack[8];
+	unsigned char 	data_seq[8];
 	uint32_t	sub_seq;
 	uint16_t	data_level_length;
 	uint16_t	checksum;
@@ -270,12 +270,13 @@ struct mp_dss_48{
 	unsigned char	reserved:3;
 #endif
 	uint32_t	data_ack;
-	uint64_t	data_seq;
+	unsigned char 	data_seq[8];
 	uint32_t	sub_seq;
 	uint16_t	data_level_length;
 	uint16_t	checksum;
 };
 
+//TODO Bug: struct hole, size align
 struct mp_dss_84{
 	uint8_t		kind;
 	uint8_t		length;
@@ -298,7 +299,7 @@ struct mp_dss_84{
 	unsigned char	F:1;
 	unsigned char	reserved:3;
 #endif
-	uint64_t	data_ack;
+	unsigned char 	data_seq[8];
 	uint32_t	data_seq;
 	uint32_t	sub_seq;
 	uint16_t	data_level_length;
