@@ -70,6 +70,8 @@ struct tc {
 	struct retransmit	*tc_retransmit;
 	struct in_addr		tc_dst_ip;
 	int			tc_dst_port;
+	struct in_addr		tc_src_ip;
+	int			tc_src_port;
 	uint8_t			tc_nonce[MAX_NONCE];
 	int			tc_nonce_len;
 	struct stuff		tc_ss;
@@ -94,13 +96,18 @@ struct tc {
 
 	unsigned char		key_a[8]; 
 	unsigned char		key_b[8]; 
+	
 	unsigned char		SHA[20];
 	unsigned char		token_b[4];
 
-	int 			index;
-	int 			tc_src_ip;	// TODO to implenment
-	int 			tc_src_port;	// TODO to implenment
-	uint32_t		isn;		// TODO tc->diff. to implenment
+	struct data_ctl 	*dhead;		// Head Pointer, no need for map at all All subflow tc point to the same pointer
+	uint32_t		diff;		// TODO tc->diff. to implenment
+
+	unsigned long           initial_client_seq;
+	unsigned long           initial_server_seq;
+	unsigned long 		initial_client_data_seq;
+	unsigned long		initial_server_data_seq;
+	
 };
 
 

@@ -256,7 +256,46 @@ static void tc_init(struct tc *tc)
 	tc->tc_mtu	    = TC_MTU;
 	tc->tc_mss_clamp    = 40; /* XXX */
 	tc->tc_sack_disable = 1;
-	tc->tc_rto	    = 100 * 1000; /* XXX */
+	tc->tc_rto	    = 100 * 1000;/* XXX */
+	tc->dhead=malloc(sizeof(struct data_ctl)); // Head Pointer, All subflow tc point to one head 
+
+}
+
+static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
+{
+	
+
+	if ((tcp->syn==1) && (tcp->ack==0)) // SYN
+	{
+			
+			tc->initial_client_seq=tcp->seq;
+			tc->initial_server_seq=tcp->ack_seq;
+			tc->tc_src_ip.s_addr=ip->ip_src.s_addr;
+			tc->tc_src_port=tcp->source;
+			tc->tc_dst_ip.s_addr=ip->ip_dst.s_addr;
+			tc->tc_dst_port=tcp->dest;
+		
+
+
+
+	}
+	if ((tcp->syn==1) && (tcp->ack==1)) // ACK
+	{
+		
+			tc->initial_client_seq=tcp->ack_seq;
+			tc->initial_server_seq=tcp->seq;
+			tc->tc_src_ip.s_addr=ip->ip_dst.s_addr;
+			tc->tc_src_port=tcp->dest;
+			tc->tc_dst_ip.s_addr=ip->ip_src.s_addr;
+			tc->tc_dst_port=tcp->source;
+		
+		
+
+
+
+	}
+
+
 
 }
 static void tc_finish(struct tc *tc)
@@ -325,6 +364,7 @@ static struct tc *new_connection(struct ip *ip, struct tcphdr *tcp, int flags)
 		
 
 		tc_init(tc);
+		tc_seq_init(tc, ip, tcp);
 
 		
 	} else {
@@ -509,258 +549,7 @@ static void *find_opt(struct tcphdr *tcp, unsigned char opt)
 	return NULL;
 }
 
-static struct tc_subopt *find_subopt(struct tcphdr *tcp, unsigned char op)
-{
-	struct tcpopt *toc;
-	struct tc_subopt *tcs;
-	int len;
-	int optlen;
 
-	toc = find_opt(tcp, 30);
-	if (!toc)
-		return NULL;
-
-	len = toc->toc_len - sizeof(*toc);
-	assert(len >= 0);
-
-	if (len == 0 && op == 0)
-		return (struct tc_subopt*) 0xbad;
-
-	tcs = &toc->toc_opts[0];
-	while (len > 0) {
-		if (len < 1)
-			return NULL;
-
-		if (tcs->tcs_op <= 0x3f)
-			optlen = 1;
-		else if (tcs->tcs_op >= 0x80) {
-			switch (tcs->tcs_op) {
-			case 0:
-			case 1:
-				optlen = 10;
-				break;
-
-			case 2:
-				/* XXX depends on cipher */
-				optlen = 12;
-				break;
-
-			default:
-				errx(1, "Unknown option %d", tcs->tcs_op);
-				break;
-			}
-		} else
-			optlen = tcs->tcs_len;
-
-		if (optlen > len)
-			return NULL;
-
-		if (tcs->tcs_op == op)
-			return tcs;
-
-		len -= optlen;
-		tcs = (struct tc_subopt*) ((unsigned long) tcs + optlen);
-	}
-	assert(len == 0);
-
-	return NULL;
-}
-
-
-
-static int foreach_subopt(struct tc *tc, int len, void *data, opt_cb cb)
-{
-	struct tc_subopt *tcs = (struct tc_subopt*) data;
-	int optlen = 0;
-	unsigned char *d;
-
-	assert(len >= 0);
-
-	if (len == 0)
-		return cb(tc, -1, 0, optlen, tcs);
-
-	while (len > 0) {
-		d = (unsigned char *) tcs;
-
-		if (len < 1)
-			goto __bad;
-
-		if (tcs->tcs_op <= 0x3f)
-			optlen = 1;
-		else if (tcs->tcs_op >= 0x80) {
-			d++;
-			switch (tcs->tcs_op) {
-			case 0:
-			case 1:
-				optlen = 10;
-				break;
-
-			case 2:
-				/* XXX depends on cipher */
-				optlen = 12;
-				break;
-
-			default:
-				errx(1, "Unknown option %d", tcs->tcs_op);
-				break;
-			}
-		} else {
-			if (len < 2)
-				goto __bad;
-			optlen = tcs->tcs_len;
-			d = tcs->tcs_data;
-		}
-
-		if (optlen > len)
-			goto __bad;
-
-		if (cb(tc, -1, tcs->tcs_op, optlen, d))
-			return 1;
-
-		len -= optlen;
-		tcs  = (struct tc_subopt*) ((unsigned long) tcs + optlen);
-	}
-
-	assert(len == 0);
-
-	return 0;
-__bad:
-	xprintf(XP_ALWAYS, "bad\n");
-	return 1;
-}
-
-static void foreach_opt(struct tc *tc, struct tcphdr *tcp, opt_cb cb)
-{
-	unsigned char *p = (unsigned char*) (tcp + 1);
-	int len = (tcp->doff << 2) - sizeof(*tcp);
-	int o, l;
-
-	assert(len >= 0);
-
-	while (len > 0) {
-		o = *p++;
-		len--;
-
-		switch (o) {
-		case TCPOPT_EOL:
-		case TCPOPT_NOP:
-			continue; /* XXX optimize */
-			l = 0;
-			break;
-
-		default:
-			if (!len) {
-				xprintf(XP_ALWAYS, "fuck\n");
-				return;
-			}
-			l = *p++;
-			len--;
-			if (l < 2 || l > (len + 2)) {
-				xprintf(XP_ALWAYS, "fuck2 %d %d\n", l, len);
-				return;
-			}
-			l -= 2;
-			break;
-		}
-
-		if (o == 0) {
-			if (foreach_subopt(tc, l, p, cb))
-				return;
-		} else {
-			if (cb(tc, o, -1, l, p))
-				return;
-		}
-
-		p   += l;
-		len -= l;
-	}
-	assert(len == 0);
-}
-
-static int do_ops_len(struct tc *tc, int tcpop, int subop, int len, void *data)
-{
-	tc->tc_optlen += len + 2;
-
-	return 0;
-}
-
-static int tcp_ops_len(struct tc *tc, struct tcphdr *tcp)
-{
-	int nops   = 40;
-	uint8_t *p = (uint8_t*) (tcp + 1);
-
-	tc->tc_optlen = 0;
-
-	foreach_opt(tc, tcp, do_ops_len);
-
-	nops -= tc->tc_optlen;
-	p    += tc->tc_optlen;
-
-	assert(nops >= 0);
-
-	while (nops--) {
-		if (*p != TCPOPT_NOP && *p != TCPOPT_EOL)
-			return (tcp->doff << 2) - 20;
-
-		p++;
-	}
-
-	return tc->tc_optlen;
-}
-
-static void *tcp_opts_alloc(struct tc *tc, struct ip *ip, struct tcphdr *tcp,
-			    int len)
-{
-	int opslen = (tcp->doff << 2) + len;
-	int pad = opslen % 4;
-	char *p;
-	int dlen = ntohs(ip->ip_len) - (ip->ip_hl << 2) - (tcp->doff << 2);
-	int ol = (tcp->doff << 2) - sizeof(*tcp);
-
-	assert(len);
-
-	/* find space in tail if full of nops */
-	if (ol == 40) {
-		ol = tcp_ops_len(tc, tcp);
-		assert(ol <= 40);
-
-		if (40 - ol >= len)
-			return (uint8_t*) (tcp + 1) + ol;
-	}
-
-	if (pad)
-		len += 4 - pad;
-
-	if (ntohs(ip->ip_len) + len > tc->tc_mtu)
-		return NULL;
-
-	p = (char*) tcp + (tcp->doff << 2);
-	memmove(p + len, p, dlen);
-	memset(p, 0, len);
-
-	assert(((tcp->doff << 2) + len) <= 60);
-
-	set_ip_len(ip, ntohs(ip->ip_len) + len);
-	tcp->doff+= len >> 2;
-
-	return p;
-}
-
-static struct tc_subopt *subopt_alloc(struct tc *tc, struct ip *ip,
-				      struct tcphdr *tcp, int len)
-{
-	struct tcpopt *toc;
-
-	len += sizeof(*toc);
-	toc = tcp_opts_alloc(tc, ip, tcp, len);
-	if (!toc)
-		return NULL;
-
-	toc->toc_kind = 30;
-	toc->toc_len  = len;
-
-	return toc->toc_opts;
-}
 
 static int sack_disable(struct tc *tc, struct tcphdr *tcp)
 {
@@ -873,6 +662,12 @@ int Generate_Random_Key(struct tc *tc){
 		
         	tc->token_b[i]=tc->SHA[i];
         }
+
+	// Assign initial Sequence Number
+	tc->initial_server_data_seq=digest[12]*256*256*256+digest[13]*256*256+digest[14]*256+digest[15];
+	sha1_buffer(tc->key_a, 8, digest); 
+	tc->initial_client_data_seq=digest[12]*256*256*256+digest[13]*256*256+digest[14]*256+digest[15];
+	
 
 	return 1; 
 }
@@ -1184,10 +979,41 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 
 	/* c -> s */	
 	struct mp_dss_44 *mp = (struct mp_dss_44*)p;
+	if(subtype == 2)
+	{
+		
+		if (tcp->source==80) // S To C
+        	{
+			if (tcp->ack==0) //Data
+			{
+
+			}
+			else
+			{
+
+			}
+
+        	}
+		else  // C to S
+		{
+			if (tcp->ack==0) //Data
+			{
+				//tc->d->c_seq
+				//tc->dhead->c_seq = tcp->seq;
+				//tc->dhead->c_ack = tcp->ack_seq;
+
+			}
+			else
+			{
+
+			}
 
 
+		}
+
+	}
 	// TODO CHECK THE PORT, ACK 0/1, WHETHER has MPOPTION to determine the direction and state
-	if(subtype == 2 && mp->A && !mp->a && mp->M && !mp->m){	/* 32 bits */ 
+	/*if(subtype == 2 && mp->A && !mp->a && mp->M && !mp->m){	/* 32 bits 
 		
 
 		struct data_ctl *dc = malloc(sizeof(*dc));
@@ -1201,16 +1027,16 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		dc->expected_ack = dc->c_data_seq + dc->packet_len;
 		
 
-		if(maplists[tc->index]){		/* add to map lists */
+		if(maplists[tc->index]){		// add to map lists 
 			dc->next = maplists[tc->index]->next;
 		}	
 		maplists[tc->index] = dc;		
-
+	
 
 		remove_mp_option(p,buffer);
 		return DIVERT_MODIFY;
 	
-	}
+	}*/
 
 	return DIVERT_MODIFY;
 }
