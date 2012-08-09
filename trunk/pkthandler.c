@@ -33,7 +33,7 @@
 #include "pkthandler.h"
 
 
-//TODO UNION 
+
 
 
 struct conn {
@@ -61,6 +61,9 @@ static struct tc		*_sockopts[65536];
 static struct freelist		_free_free;
 static struct freelist		_free_tc;
 static struct freelist		_free_conn;
+
+
+static struct data_ctl*		maplists[65536];
 
 static void *get_free(struct freelist *f, unsigned int sz)
 {
@@ -1169,19 +1172,44 @@ int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr 
 	return DIVERT_DROP;
 
 }
+
+struct data_ctl* lookup_data_control(struct tc *tc){
+	struct data_ctl *dc = malloc(sizeof(*dc));
+	return dc;
+}
+
+/*c -> s*/
 int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer,int subtype){
 	printf("EST: Seq %d Ack %d\n", tcp->seq,tcp->ack_seq);
 
+	/* c -> s */	
 	struct mp_dss_44 *mp = (struct mp_dss_44*)p;
-	if(subtype == 2 && mp->A && !mp->a && mp->M && !mp->m){	/* 32 bits */
-/*		if(ip->ip_src == */
-/*		*/
-/*		do_output_data_c2s();*/
-/*	*/
-/*		do_output_data_s2c();			*/
+
+
+	// TODO CHECK THE PORT, ACK 0/1, WHETHER has MPOPTION to determine the direction and state
+	if(subtype == 2 && mp->A && !mp->a && mp->M && !mp->m){	/* 32 bits */ 
 		
 
+		struct data_ctl *dc = malloc(sizeof(*dc));
+		dc->c_seq = tcp->seq;
+		dc->c_ack = tcp->ack_seq;
+		dc->c_data_ack = mp->data_ack;
+		dc->c_data_seq = mp->data_seq;
+		dc->s_seq = dc->c_data_ack + tc->isn;	//TODO need record???
+		dc->s_ack =  dc->c_data_ack + tc->isn;	//TODO value? need record???
+		dc->packet_len = mp->data_level_len;
+		dc->expected_ack = dc->c_data_seq + dc->packet_len;
 		
+
+		if(maplists[tc->index]){		/* add to map lists */
+			dc->next = maplists[tc->index]->next;
+		}	
+		maplists[tc->index] = dc;		
+
+
+		remove_mp_option(p,buffer);
+		return DIVERT_MODIFY;
+	
 	}
 
 	return DIVERT_MODIFY;
