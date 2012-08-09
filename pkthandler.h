@@ -96,7 +96,13 @@ struct tc {
 	unsigned char		key_b[8]; 
 	unsigned char		SHA[20];
 	unsigned char		token_b[4];
+
+	int 			index;
+	int 			tc_src_ip;	// TODO to implenment
+	int 			tc_src_port;	// TODO to implenment
+	uint32_t		isn;		// TODO tc->diff. to implenment
 };
+
 
 struct tc_ctl {
 	uint32_t	tcc_seq;
@@ -214,7 +220,7 @@ struct mp_dss_44{
 	uint32_t	data_ack;
 	uint32_t	data_seq;
 	uint32_t	sub_seq;
-	uint16_t	data_level_length;
+	uint16_t	data_level_len;
 	uint16_t	checksum;
 };
 
@@ -243,7 +249,7 @@ struct mp_dss_88{
 	unsigned char	data_ack[8];
 	unsigned char 	data_seq[8];
 	uint32_t	sub_seq;
-	uint16_t	data_level_length;
+	uint16_t	data_level_len;
 	uint16_t	checksum;
 };
 
@@ -272,11 +278,11 @@ struct mp_dss_48{
 	uint32_t	data_ack;
 	unsigned char 	data_seq[8];
 	uint32_t	sub_seq;
-	uint16_t	data_level_length;
+	uint16_t	data_level_len;
 	uint16_t	checksum;
 };
 
-//TODO Bug: struct hole, size align
+
 struct mp_dss_84{
 	uint8_t		kind;
 	uint8_t		length;
@@ -299,10 +305,10 @@ struct mp_dss_84{
 	unsigned char	F:1;
 	unsigned char	reserved:3;
 #endif
-	unsigned char 	data_seq[8];
+	unsigned char 	data_ack[8];
 	uint32_t	data_seq;
 	uint32_t	sub_seq;
-	uint16_t	data_level_length;
+	uint16_t	data_level_len;
 	uint16_t	checksum;
 };
 
@@ -358,6 +364,21 @@ struct tcpopt{
 	uint8_t		 toc_len;
 	struct tc_subopt toc_opts[0];
 };
+
+struct data_ctl{
+	uint32_t c_seq;
+	uint32_t c_ack;
+	uint32_t c_data_seq;
+	uint32_t c_data_ack;
+	uint32_t s_seq;
+	uint32_t s_ack;	
+	uint16_t packet_len;
+	uint32_t expected_ack;
+	struct tc* tc;
+	struct data_ctl* next;
+};
+	
+
 
 
 extern void print_packet(struct ip *ip, struct tcphdr *tcp, int flags, struct tc *tc);
