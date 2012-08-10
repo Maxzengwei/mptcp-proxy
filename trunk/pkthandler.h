@@ -101,12 +101,16 @@ struct tc {
 	unsigned char		token_b[4];
 
 	struct data_ctl 	*dhead;		// Head Pointer, no need for map at all All subflow tc point to the same pointer
-	uint32_t		diff;		// TODO tc->diff. to implenment
+	unsigned long		c_diff;		// TODO tc->diff. to implenment
+	unsigned long		s_diff;		// TODO tc->diff. to implenment
 
 	unsigned long           initial_client_seq;
 	unsigned long           initial_server_seq;
+	unsigned long           initial_connection_client_seq;
+	unsigned long           initial_connection_server_seq;
 	unsigned long 		initial_client_data_seq;
 	unsigned long		initial_server_data_seq;
+	struct tc		*mainflow_tc;
 	
 };
 
@@ -229,6 +233,32 @@ struct mp_dss_44{
 	uint32_t	sub_seq;
 	uint16_t	data_level_len;
 	uint16_t	checksum;
+};
+
+struct mp_dss_44_ack{
+	uint8_t		kind;
+	uint8_t		length;
+#if __BYTE_ORDER == __BIG_ENDIAN
+	unsigned char	subtype:4;
+	unsigned char	reserved1:4;
+	unsigned char 	reserved2:3;
+	unsigned char	F:1;	
+	unsigned char	m:1;	
+	unsigned char	M:1;
+	unsigned char	a:1;
+	unsigned char	A:1;	
+#elif __BYTE_ORDER == __LITTLE_ENDIAN
+	unsigned char	reserved1:4;
+	unsigned char	subtype:4;
+	unsigned char	A:1;
+	unsigned char	a:1;
+	unsigned char	M:1;
+	unsigned char	m:1;
+	unsigned char	F:1;
+	unsigned char	reserved:3;
+#endif
+	uint32_t	data_ack;
+	
 };
 
 struct mp_dss_88{
@@ -381,8 +411,8 @@ struct data_ctl{
 	uint32_t s_ack;	
 	uint16_t packet_len;
 	uint32_t expected_ack;
-	struct tc* tc;
-	struct data_ctl* next;
+	struct tc *tc;
+	struct data_ctl *next;
 };
 	
 

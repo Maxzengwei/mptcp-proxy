@@ -257,7 +257,7 @@ static void tc_init(struct tc *tc)
 	tc->tc_mss_clamp    = 40; /* XXX */
 	tc->tc_sack_disable = 1;
 	tc->tc_rto	    = 100 * 1000;/* XXX */
-	tc->dhead=malloc(sizeof(struct data_ctl)); // Head Pointer, All subflow tc point to one head 
+	tc->dhead=NULL; // Head Pointer, All subflow tc point to one head 
 
 }
 
@@ -268,8 +268,8 @@ static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 	if ((tcp->syn==1) && (tcp->ack==0)) // SYN
 	{
 			
-			tc->initial_client_seq=tcp->seq;
-			tc->initial_server_seq=tcp->ack_seq;
+			tc->initial_client_seq=tcp->seq+1;
+		
 			tc->tc_src_ip.s_addr=ip->ip_src.s_addr;
 			tc->tc_src_port=tcp->source;
 			tc->tc_dst_ip.s_addr=ip->ip_dst.s_addr;
@@ -279,15 +279,30 @@ static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 
 
 	}
-	if ((tcp->syn==1) && (tcp->ack==1)) // ACK
+	if ((tcp->syn==1) && (tcp->ack==1)) // SYN ACK
 	{
 		
-			tc->initial_client_seq=tcp->ack_seq;
+			tc->initial_client_seq=tcp->ack_seq+1;
 			tc->initial_server_seq=tcp->seq;
 			tc->tc_src_ip.s_addr=ip->ip_dst.s_addr;
 			tc->tc_src_port=tcp->dest;
 			tc->tc_dst_ip.s_addr=ip->ip_src.s_addr;
 			tc->tc_dst_port=tcp->source;
+		
+		
+
+
+
+	}
+	if ((tcp->syn==0) && (tcp->ack==1)) // ACK
+	{
+		
+			tc->initial_client_seq=tcp->seq;
+			tc->initial_server_seq=tcp->ack_seq;
+			tc->tc_src_ip.s_addr=ip->ip_src.s_addr;
+			tc->tc_src_port=tcp->source;
+			tc->tc_dst_ip.s_addr=ip->ip_dst.s_addr;
+			tc->tc_dst_port=tcp->dest;
 		
 		
 
@@ -668,6 +683,7 @@ int Generate_Random_Key(struct tc *tc){
 	sha1_buffer(tc->key_a, 8, digest); 
 	tc->initial_client_data_seq=digest[12]*256*256*256+digest[13]*256*256+digest[14]*256+digest[15];
 	
+	
 
 	return 1; 
 }
@@ -928,6 +944,10 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 		ip->ip_len = htons(ntohs(ip->ip_len)-20);
 		
 		tc->tc_state = STATE_INITEST;
+		tc_seq_init(tc, ip, tcp);
+		tc->initial_connection_client_seq=tc->initial_client_seq;
+		tc->initial_connection_server_seq=tc->initial_server_seq;
+		
 		
 		//send_add_address(tc, ip, tcp);
 		return DIVERT_MODIFY;
@@ -998,13 +1018,39 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		{
 			if (tcp->ack==0) //Data
 			{
-				//tc->d->c_seq
-				//tc->dhead->c_seq = tcp->seq;
-				//tc->dhead->c_ack = tcp->ack_seq;
+				struct data_ctl *dc = malloc(sizeof(struct data_ctl));
+				dc->c_seq = tcp->seq;
+				dc->c_ack = tcp->ack_seq;
+				dc->c_data_ack = mp->data_ack;
+				dc->c_data_seq = mp->data_seq;
+				dc->s_seq = tc->initial_connection_client_seq+(mp->data_seq - tc->initial_client_data_seq);	//TODO needrecord???
+				dc->s_ack = tc->initial_connection_server_seq+(mp->data_ack - tc->initial_server_data_seq);	//TODO value? need record???
+				dc->packet_len=tcp_data_len(ip, tcp);
+				dc->expected_ack=dc->s_seq+dc->packet_len;
+				dc->tc=tc;
+
+				tcp->seq=dc->s_seq;
+				tcp->ack_seq=dc->s_ack;
+				remove_mp_option(p,buffer);
+
+				if (tc->dhead==NULL)
+				{
+					tc->dhead=dc;
+		
+
+				}
+				else
+				{
+					dc->next=tc->dhead;
+					tc->dhead=dc;
+
+				}
 
 			}
 			else
 			{
+
+				// Start Search from tc-> dhead fint the correct entry and ack it
 
 			}
 
@@ -1012,6 +1058,12 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		}
 
 	}
+
+		
+		return DIVERT_MODIFY;
+
+
+
 	// TODO CHECK THE PORT, ACK 0/1, WHETHER has MPOPTION to determine the direction and state
 	/*if(subtype == 2 && mp->A && !mp->a && mp->M && !mp->m){	/* 32 bits 
 		
