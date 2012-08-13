@@ -63,7 +63,6 @@ static struct freelist		_free_tc;
 static struct freelist		_free_conn;
 
 
-static struct data_ctl*		maplists[65536];
 
 static void *get_free(struct freelist *f, unsigned int sz)
 {
@@ -145,7 +144,7 @@ void print_packet(struct ip *ip, struct tcphdr *tcp, int flags, struct tc *tc)
 
         //strcpy(src, inet_ntoa(ip->ip_src));
 	
-       xprintf(XP_ALWAYS, "\n\n%s:%d",
+       xprintf(XP_ALWAYS, "\n\n1.   %s:%d",
                 inet_ntoa(ip->ip_src),
                 ntohs(tcp->source));
        xprintf(XP_ALWAYS, "->%s:%d %d %s tc %p State %d\n",
@@ -257,9 +256,9 @@ static void tc_init(struct tc *tc)
 	tc->tc_mss_clamp    = 40; /* XXX */
 	tc->tc_sack_disable = 1;
 	tc->tc_rto	    = 100 * 1000;/* XXX */
-	tc->dhead=NULL; // Head Pointer, All subflow tc point to one head 
-
+	tc->pre_dhead=NULL; // TODO 1. mpjoin 2. free memory 
 }
+
 
 static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 {
@@ -274,9 +273,6 @@ static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 			tc->tc_src_port=tcp->source;
 			tc->tc_dst_ip.s_addr=ip->ip_dst.s_addr;
 			tc->tc_dst_port=tcp->dest;
-		
-
-
 
 	}
 	if ((tcp->syn==1) && (tcp->ack==1)) // SYN ACK
@@ -289,9 +285,6 @@ static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 			tc->tc_dst_ip.s_addr=ip->ip_src.s_addr;
 			tc->tc_dst_port=tcp->source;
 		
-		
-
-
 
 	}
 	if ((tcp->syn==0) && (tcp->ack==1)) // ACK
@@ -304,15 +297,11 @@ static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 			tc->tc_dst_ip.s_addr=ip->ip_dst.s_addr;
 			tc->tc_dst_port=tcp->dest;
 		
-		
-
-
-
 	}
 
-
-
 }
+
+
 static void tc_finish(struct tc *tc)
 {
 
@@ -376,7 +365,6 @@ static struct tc *new_connection(struct ip *ip, struct tcphdr *tcp, int flags)
 		tc = get_tc();
 		assert(tc);
 
-		
 
 		tc_init(tc);
 		tc_seq_init(tc, ip, tcp);
@@ -657,7 +645,7 @@ int Generate_Random_Key(struct tc *tc){
 	
 
         sha1_buffer(key, 8, digest); 
-        printf("---------SHA-1---------------\n");
+ //       printf("---------SHA-1---------------\n");
  
             
         for(i = 0; i < 20 ; i++)
@@ -665,7 +653,7 @@ int Generate_Random_Key(struct tc *tc){
             
 
             tc->SHA[i]=digest[i]; 
-	    printf("%x ", tc->SHA[i]);           
+//	    printf("%x ", tc->SHA[i]);           
             
 
 
@@ -858,10 +846,7 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 			checksum_packet(tc, ip, tcp);
 			divert_inject(ip, ntohs(ip->ip_len));
 			
-			return DIVERT_DROP;
-			
-
-			
+			return DIVERT_DROP;	
 			
 		}
 		else 
@@ -875,11 +860,7 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
                 	checksum_packet(tc, ip, tcp);
                 	divert_inject(ip, ntohs(ip->ip_len));
                 	return DIVERT_DROP;
-                }
-			
-			
-
-		
+                }	
 		
 	
 	}
@@ -891,7 +872,6 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
 	printf("\nSYN SENT: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == TYPE_MP_CAPABLE){
-		tc->tc_state = STATE_PROXY_OFF;
 		return DIVERT_ACCEPT;
 	}
 
@@ -935,9 +915,8 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
 	printf("\nACK: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 
-
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == 0){
-		printf("----REMOVE----------\n");
+		printf(">>>>>>>REMOVE\n");
 		mptcp_remove(tc, tcp);
 		
 		tcp->doff = tcp->doff - 5;
@@ -988,109 +967,140 @@ int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr 
 
 }
 
-struct data_ctl* lookup_data_control(struct tc *tc){
-	struct data_ctl *dc = malloc(sizeof(*dc));
-	return dc;
-}
+int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer){
 
-/*c -> s*/
-int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer,int subtype){
-	printf("EST: Seq %d Ack %d\n", tcp->seq,tcp->ack_seq);
 
-	/* c -> s */	
+	printf("OLD TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
 	struct mp_dss_44 *mp = (struct mp_dss_44*)p;
-	if(subtype == 2)
+	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
+
+	if(tc->pre_dhead == NULL){ //first subflow
+		tc->pre_dhead = malloc(sizeof(struct data_ctl));
+		tc->c2s_diff = ntohl(tcp->seq) - ntohl(mp->data_seq);
+		dc->s_ack = ntohl(tcp->ack_seq);		// init ack , changed by received data in s->c
+	}
+	dc->c_seq = ntohl(tcp->seq);
+	dc->c_ack = ntohl(tcp->ack_seq);
+	dc->c_data_ack = ntohl(mp->data_ack);
+	dc->c_data_seq = ntohl(mp->data_seq);
+	dc->s_seq = ntohl(mp->data_seq) + tc->c2s_diff;
+	dc->data_len=ntohs(mp->data_level_len);
+	dc->expected_ack=dc->s_seq+dc->data_len;
+	dc->tc=tc;
+	
+	/* add to link list */	
+	if (tc->pre_dhead->next==NULL){
+		tc->pre_dhead->next=dc;
+	}
+	else
 	{
-		
-		if (tcp->source==80) // S To C
-        	{
-			if (tcp->ack==0) //Data
-			{
-
-			}
-			else
-			{
-
-			}
-
-        	}
-		else  // C to S
-		{
-			if (tcp->ack==0) //Data
-			{
-				struct data_ctl *dc = malloc(sizeof(struct data_ctl));
-				dc->c_seq = tcp->seq;
-				dc->c_ack = tcp->ack_seq;
-				dc->c_data_ack = mp->data_ack;
-				dc->c_data_seq = mp->data_seq;
-				dc->s_seq = tc->initial_connection_client_seq+(mp->data_seq - tc->initial_client_data_seq);	//TODO needrecord???
-				dc->s_ack = tc->initial_connection_server_seq+(mp->data_ack - tc->initial_server_data_seq);	//TODO value? need record???
-				dc->packet_len=tcp_data_len(ip, tcp);
-				dc->expected_ack=dc->s_seq+dc->packet_len;
-				dc->tc=tc;
-
-				tcp->seq=dc->s_seq;
-				tcp->ack_seq=dc->s_ack;
-				remove_mp_option(p,buffer);
-
-				if (tc->dhead==NULL)
-				{
-					tc->dhead=dc;
-		
-
-				}
-				else
-				{
-					dc->next=tc->dhead;
-					tc->dhead=dc;
-
-				}
-
-			}
-			else
-			{
-
-				// Start Search from tc-> dhead fint the correct entry and ack it
-
-			}
-
-
-		}
-
+		dc->next=tc->pre_dhead->next;
+		tc->pre_dhead->next=dc;
 	}
 
-		
-		return DIVERT_MODIFY;
+	tcp->seq=htonl(dc->s_seq);
+	tcp->ack_seq=htonl(dc->s_ack);
+	printf("New TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
+	remove_mp_option(p,buffer);
 
+	printf("REMOVED\n");
 
+}
 
-	// TODO CHECK THE PORT, ACK 0/1, WHETHER has MPOPTION to determine the direction and state
-	/*if(subtype == 2 && mp->A && !mp->a && mp->M && !mp->m){	/* 32 bits 
-		
+int send_ack(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 
-		struct data_ctl *dc = malloc(sizeof(*dc));
-		dc->c_seq = tcp->seq;
-		dc->c_ack = tcp->ack_seq;
-		dc->c_data_ack = mp->data_ack;
-		dc->c_data_seq = mp->data_seq;
-		dc->s_seq = dc->c_data_ack + tc->isn;	//TODO need record???
-		dc->s_ack =  dc->c_data_ack + tc->isn;	//TODO value? need record???
-		dc->packet_len = mp->data_level_len;
-		dc->expected_ack = dc->c_data_seq + dc->packet_len;
-		
+	tcp->seq = htonl(dc->c_ack);
+	tcp->ack_seq = htonl(dc->c_seq)+ htonl(dc->data_len);
 
-		if(maplists[tc->index]){		// add to map lists 
-			dc->next = maplists[tc->index]->next;
-		}	
-		maplists[tc->index] = dc;		
+	struct mp_dss_44_ack *mp = malloc(sizeof(struct mp_dss_44_ack));
+	mp->kind = TCPOPT_MPTCP;
+	mp->length = 8;
+	mp->subtype = TYPE_MP_DSS;
+	mp->reserved1 = 0;
+	mp->reserved2 = 0;
+	mp->F = 0; //TODO CHECK fin flag
+	mp->m = 0;
+	mp->M = 0;
+	mp->a = 0;
+	mp->A = 1;
+	mp->data_ack = htonl(dc->s_ack) - htonl(dc->tc->c2s_diff);
 	
 
-		remove_mp_option(p,buffer);
-		return DIVERT_MODIFY;
-	
-	}*/
 
-	return DIVERT_MODIFY;
+
+  			u_char* ptr = (u_char *)tcp + sizeof(*tcp);
+			int option_len = (tcp->doff-5) << 2;
+			ptr+=option_len;
+ 			memcpy(ptr,mp,mp->length);  
+	
+
+			tcp->doff += 2;
+			ip->ip_len = htons(ntohs(ip->ip_len)+8);
+			
+			checksum_packet(dc->tc, ip, tcp);
+	
+			
+	printf(" >>>>>>>>>>>>>>>>SEND ACK %x\n",ntohl(mp->data_ack)); 
+	divert_inject(ip, ntohs(ip->ip_len));
+	free(mp);
+}
+
+/* find packet to ack,  */
+int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
+	//tc->seq;
+	//tc->ack;
+	struct data_ctl *dc = tc->pre_dhead->next;
+	
+	if(dc == NULL){
+		printf("ERROR: cant find the packet to ack");
+	}
+
+	printf("SSSSSSSSSSSSSSSSSS\n");
+	printf("S_ACK: %x\n", ntohl(tcp->ack_seq));
+
+	struct data_ctl *previous = dc->tc->pre_dhead;
+	while(dc){
+	printf("S_expexted: %x\n", dc->expected_ack);
+		if(dc->expected_ack <= ntohl(tcp->ack_seq)){
+			send_ack(ip,tcp,dc);
+		
+			previous->next = dc->next;
+			free(dc);
+			dc = previous->next;
+		
+		}else{
+			previous = dc;
+			dc = dc->next;
+		}
+	}
+
+}
+
+
+int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer,int subtype){
+	int rc = DIVERT_ACCEPT;
+	int sport = ntohs(tcp->source);
+//	printf("EST: Seq %d Ack %d,subtype %d\n", tcp->seq,tcp->ack_seq,subtype);
+
+	printf("Source Port %d, ack %x, subtype %d\n ",sport,ntohl(tcp->ack), subtype);
+
+	/* tcp ->ack cant detect the state */
+	if (sport==80 && subtype == 2){ // Data in S -> C
+//		do_output_data_s2c(tc,ip,p,tcp,buffer);
+		rc = DIVERT_MODIFY;
+ 	}else if(sport!=80  && subtype == 2){ // Data in C -> S
+		do_output_data_c2s(tc,ip,p,tcp,buffer);
+		rc = DIVERT_MODIFY;
+	}else if (sport==80  && subtype == -1){ //Data ACK in C-> S
+		do_output_data_ack_c2s(tc,ip,tcp);
+		rc = DIVERT_DROP;
+	}else if (sport!=80  && subtype == -1){ //Data ACK in S-> C
+//		do_output_data_ack_s2c();
+//		rc = DIVERT_DROP;
+	}	
+
+
+	return rc;
 }
 
 int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
@@ -1193,12 +1203,12 @@ int handle_packet(void *packet, int len, int flags)
 
 	if(option_len>0){
 
-		printf("optionlen: %d ",option_len);
+		printf("2.  optionlen: %d ",option_len);
 		printf("Checksum:%x\n",ntohs(tcp->check));
 
 		//u_char* cp = (u_char *)tcp + sizeof(*tcp);
 		
-		printf("OLD TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);	
+		printf("3.  OLD TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);	
 		sack_disable(tc,tcp);
 		ws_disable(tc,tcp);
 		toc=find_opt(tcp, TCPOPT_MPTCP);
@@ -1210,17 +1220,15 @@ int handle_packet(void *packet, int len, int flags)
 			buffer = malloc(mptcp_option_len);
 			memcpy(buffer,p,mptcp_option_len);
 			subtype = (buffer[2]&0xf0)>>4;
-			printf("---%d, %d---", mptcp_option_len, subtype);
 		}
 	}
 
-	
 	rc=do_output(tc,ip,p,tcp,buffer,subtype);	
 	checksum_packet(tc, ip, tcp);
 
-	printf("NEW: ");
+
 	print_option(packet,len);
-	printf("NEW TCP Header Length: %d, Option length %d  ", tcp->doff << 2, (tcp->doff-5) << 2);
+	printf("NEW TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);
 
 	return rc;
 
