@@ -22,6 +22,7 @@
 
 
 #define TYPE_MP_CAPABLE 0
+#define TYPE_MP_DSS 2
 enum {
 	TCPSTATE_CLOSED	= 0,
 	TCPSTATE_FIN1_SENT,
@@ -100,17 +101,22 @@ struct tc {
 	unsigned char		SHA[20];
 	unsigned char		token_b[4];
 
-	struct data_ctl 	*dhead;		// Head Pointer, no need for map at all All subflow tc point to the same pointer
-	unsigned long		c_diff;		// TODO tc->diff. to implenment
-	unsigned long		s_diff;		// TODO tc->diff. to implenment
+	struct data_ctl 	*pre_dhead;		// Head Pointer,real header of data be linked after this
+	uint32_t		c2s_diff;		// TODO tc->diff. to implenment.  TESTED: it's fine to store negative number 
+	uint32_t		s2c_diff;		// TODO tc->diff. to implenment		in uint32_t
 
-	unsigned long           initial_client_seq;
-	unsigned long           initial_server_seq;
+
+
+	/* unused, for checking first data packet */
+	uint32_t 		initial_server_seq;
+	uint32_t		initial_client_seq;
+
 	unsigned long           initial_connection_client_seq;
 	unsigned long           initial_connection_server_seq;
+		
 	unsigned long 		initial_client_data_seq;
 	unsigned long		initial_server_data_seq;
-	struct tc		*mainflow_tc;
+
 	
 };
 
@@ -226,7 +232,7 @@ struct mp_dss_44{
 	unsigned char	M:1;
 	unsigned char	m:1;
 	unsigned char	F:1;
-	unsigned char	reserved:3;
+	unsigned char	reserved2:3;
 #endif
 	uint32_t	data_ack;
 	uint32_t	data_seq;
@@ -255,7 +261,7 @@ struct mp_dss_44_ack{
 	unsigned char	M:1;
 	unsigned char	m:1;
 	unsigned char	F:1;
-	unsigned char	reserved:3;
+	unsigned char	reserved2:3;
 #endif
 	uint32_t	data_ack;
 	
@@ -402,6 +408,7 @@ struct tcpopt{
 	struct tc_subopt toc_opts[0];
 };
 
+/* host byte order */
 struct data_ctl{
 	uint32_t c_seq;
 	uint32_t c_ack;
@@ -409,7 +416,7 @@ struct data_ctl{
 	uint32_t c_data_ack;
 	uint32_t s_seq;
 	uint32_t s_ack;	
-	uint16_t packet_len;
+	uint16_t data_len;
 	uint32_t expected_ack;
 	struct tc *tc;
 	struct data_ctl *next;
