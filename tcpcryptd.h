@@ -32,6 +32,7 @@ struct conf {
 	int		cf_modify;
 	int		cf_test;
 	int		cf_disable_timers;
+	struct in_addr  host_addr;
 };
 
 extern struct conf _conf;
