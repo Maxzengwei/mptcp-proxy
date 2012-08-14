@@ -710,54 +710,89 @@ void header_switch(struct ip *ip, struct tcphdr *tcp)
 
 }
 
-int send_add_address(struct tc *tc,struct ip *ip,struct tcphdr *tcp){ 
-/*	        // Untested*/
-/*		in_addr_t mid;*/
-/*                short midp;*/
+int send_add_address(struct tc *tc, struct ip *ip2,struct tcphdr *tcp2){ 
+	        
+	if (_conf.host_addr.s_addr==0)
+	{
+		printf("\n********No Proxy Address********\n!");		
+		return 0;
+	}
+	else 
+        { 		
+		struct ip *ip;
+		struct tcphdr *tcp;
+		
+		int tcp_len=tcp2->doff << 2;
 
-/*                tcp->syn=0;*/
-/*               */
-/*                // Switch port*/
-/*                midp=tcp->dest;*/
-/*                tcp->dest=tcp->source;*/
-/*                tcp->source=midp;*/
-/*               	*/
-/*               // Switch Address*/
-/*                mid=ip->ip_src.s_addr;*/
-/*                ip->ip_src.s_addr=ip->ip_dst.s_addr;*/
-/*                ip->ip_dst.s_addr=mid;*/
+		ip=malloc(ntohs(ip2->ip_len));
+		
+		
+		memcpy(ip, ip2, ntohs(ip2->ip_len));
+		tcp = (struct tcphdr*) ((unsigned long) ip + (ip->ip_hl << 2));	
+		
+		
+		
 
-/*                tcp->ack=1;*/
-/*		// Change Sequence Num*/
-/*		tcp->seq=1;*/
-/*		tcp->ack_seq=1;*/
-/*                */
-/*		*/
-/*		struct mp_add_addr_4* mp;*/
-/*		mp=malloc(sizeof(struct mp_add_addr_4));*/
-/*		*/
-/*		mp->kind=30;*/
-/*		mp->length=8;*/
-/*		mp->subtype=3;*/
-/*		mp->ipver=4;*/
-/*		mp->address=1;*/
-/*		mp->ipv4=inet_addr("192.168.1.35"); //TODO Write LOCAL ADDRESS, may need to be input by client at main*/
-/*		*/
-/*		u_char* ptr = (u_char *)tcp + sizeof(*tcp);*/
-/*		int option_len = (tcp->doff-5) << 2;*/
-/*		ptr+=option_len;*/
-/*		*/
-/*		memcpy(ptr,mp,8);  //TODO Modify IP length??*/
-/*		tcp->doff += 2;*/
-/*		ip->ip_len= ntohs2;*/
-/*		checksum_packet(tc, ip, tcp);*/
-/*		*/
-/*                */
-/*                divert_inject(ip, ntohs(ip->ip_len));*/
+
+		in_addr_t mid;
+                short midp;
+		unsigned long mids; 
+
+                tcp->syn=0;
+		tcp->ack=1;
+                
+                //Switch port
+                midp=tcp->source;
+                tcp->source=tcp->dest;
+                tcp->dest=midp;
+               	
+                //Switch Address
+                mid=ip->ip_src.s_addr;
+                ip->ip_src.s_addr=ip->ip_dst.s_addr;
+                ip->ip_dst.s_addr=mid;
+
+                
+		//Change Sequence Num
+		mids=tcp->seq;		
+		tcp->seq=tcp->ack_seq;
+		tcp->ack_seq=mids;
+                
+		
+		struct mp_add_addr_4 *mp;
+		mp=malloc(sizeof(struct mp_add_addr_4));
+		
+		mp->kind=30;
+		mp->length=8;
+		mp->subtype=3;
+		mp->ipver=4;
+		mp->address=1;
+		mp->ipv4=_conf.host_addr.s_addr; //TODO Write LOCAL ADDRESS, may need to be input by client at main*/
+		
+		struct tcpopt *toc;
+		toc=find_opt(tcp, TCPOPT_MPTCP);
+		
+
+	
+		mptcp_remove(tc, tcp);
+		char* cp = (char *)toc;
+		memcpy(cp, mp, 8);  //TODO Modify IP length??*/
+	
+		
+		printf("\nold tcp %d--", tcp->doff);
+		tcp->doff = tcp->doff-3;
+		ip->ip_len = htons(ntohs(ip->ip_len)-12);
+		checksum_packet(tc, ip, tcp);
+		
+		printf("\nnew tcp %d--%d to %d", tcp->doff, tcp-> source, tcp->dest);
+                print_option(ip, 0);
+		printf("\n");
+
+                divert_inject(ip, ntohs(ip->ip_len));
 
 
 
 	return 0;
+	}
 }
 /* Calulate_MAC 
 
@@ -917,6 +952,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == 0){
 		printf(">>>>>>>REMOVE\n");
+		send_add_address(tc, ip, tcp);
 		mptcp_remove(tc, tcp);
 		
 		tcp->doff = tcp->doff - 5;
@@ -928,7 +964,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 		tc->initial_connection_server_seq=tc->initial_server_seq;
 		
 		
-		//send_add_address(tc, ip, tcp);
+		
 		return DIVERT_MODIFY;
 
 	}
@@ -1081,23 +1117,24 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer,int subtype){
 	int rc = DIVERT_ACCEPT;
 	int sport = ntohs(tcp->source);
+	int data_len=tcp_data_len(ip, tcp);
 //	printf("EST: Seq %d Ack %d,subtype %d\n", tcp->seq,tcp->ack_seq,subtype);
 
 	printf("Source Port %d, ack %x, subtype %d\n ",sport,ntohl(tcp->ack), subtype);
 
 	/* tcp ->ack cant detect the state */
-	if (sport==80 && subtype == 2){ // Data in S -> C
+	if (sport==80 && subtype == -1 && data_len>0){ // Data in S -> C (If sport=80, subtype can never = 2 because server has no mptcp option)
 //		do_output_data_s2c(tc,ip,p,tcp,buffer);
 		rc = DIVERT_MODIFY;
- 	}else if(sport!=80  && subtype == 2){ // Data in C -> S
+ 	}else if(sport!=80  && subtype == 2 && data_len>0){ // Data in C -> S
 		do_output_data_c2s(tc,ip,p,tcp,buffer);
 		rc = DIVERT_MODIFY;
-	}else if (sport==80  && subtype == -1){ //Data ACK in C-> S
+	}else if (sport==80  && subtype == -1 && data_len==0){ //Data ACK in C-> S 
 		do_output_data_ack_c2s(tc,ip,tcp);
 		rc = DIVERT_DROP;
-	}else if (sport!=80  && subtype == -1){ //Data ACK in S-> C
+	}else if (sport!=80  && subtype == 2 &&  data_len==0){ //Data ACK in S-> C
 //		do_output_data_ack_s2c();
-//		rc = DIVERT_DROP;
+		rc = DIVERT_MODIFY;
 	}	
 
 

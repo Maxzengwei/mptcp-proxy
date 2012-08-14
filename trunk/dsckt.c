@@ -411,7 +411,10 @@ int main(int argc, char *argv[])
 	_conf.cf_port = 666;
 	_conf.cf_ctl  = 666;
 	_conf.cf_test = -1;
-
+	if (argc>1)
+		_conf.host_addr.s_addr=inet_addr(argv[1]);
+	else
+		_conf.host_addr.s_addr=0;
 	
 	mptcp();
 	cleanup();
