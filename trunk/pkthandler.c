@@ -886,7 +886,7 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 			mp->length = 12;
 			mp->subtype = TYPE_MP_CAPABLE;
 			mp->version = 0;   
-			mp->reserved = 0x81;                     
+			mp->reserved = 0x01;                     
 			memcpy(mp->sender_key,tc->key_b,sizeof(mp->sender_key));
 			
 			
@@ -986,6 +986,7 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	dc->s_seq = ntohl(mp->data_seq) + tc->c2s_diff;
 	dc->data_len=ntohs(mp->data_level_len);
 	dc->expected_ack=dc->s_seq+dc->data_len;
+	
 	dc->tc=tc;
 	
 	/* add to link list */	
@@ -1010,7 +1011,7 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 int send_ack(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 
 	tcp->seq = htonl(dc->c_ack);
-	tcp->ack_seq = htonl(dc->c_seq)+ htonl(dc->data_len);
+	tcp->ack_seq = htonl(dc->c_seq + dc->data_len);
 
 	struct mp_dss_44_ack *mp = malloc(sizeof(struct mp_dss_44_ack));
 	mp->kind = TCPOPT_MPTCP;
@@ -1023,7 +1024,7 @@ int send_ack(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 	mp->M = 0;
 	mp->a = 0;
 	mp->A = 1;
-	mp->data_ack = htonl(dc->s_ack) - htonl(dc->tc->c2s_diff);
+	mp->data_ack = htonl(dc->c_data_seq + dc->data_len);
 	
 
 
