@@ -1013,6 +1013,7 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	if(tc->pre_dhead == NULL){ //first subflow
 		tc->pre_dhead = malloc(sizeof(struct data_ctl));
 		tc->c2s_diff = ntohl(tcp->seq) - ntohl(mp->data_seq);
+		tc->s2c_diff = ntohl(tcp->ack_seq)-ntohl(mp->data_seq);
 		dc->s_ack = ntohl(tcp->ack_seq);		// init ack , changed by received data in s->c
 	}
 	dc->c_seq = ntohl(tcp->seq);
@@ -1044,7 +1045,7 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 }
 
-int send_ack(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
+int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 
 	tcp->seq = htonl(dc->c_ack);
 	tcp->ack_seq = htonl(dc->c_seq + dc->data_len);
@@ -1062,10 +1063,7 @@ int send_ack(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 	mp->A = 1;
 	mp->data_ack = htonl(dc->c_data_seq + dc->data_len);
 	
-
-
-
-  			u_char* ptr = (u_char *)tcp + sizeof(*tcp);
+		u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 			int option_len = (tcp->doff-5) << 2;
 			ptr+=option_len;
  			memcpy(ptr,mp,mp->length);  
@@ -1077,29 +1075,27 @@ int send_ack(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 			checksum_packet(dc->tc, ip, tcp);
 	
 			
-	printf(" >>>>>>>>>>>>>>>>SEND ACK %x\n",ntohl(mp->data_ack)); 
+	printf(" >>>>>>>>>>>>>>>>SEND data ACK %x\n",ntohl(mp->data_ack)); 
 	divert_inject(ip, ntohs(ip->ip_len));
 	free(mp);
 }
 
 /* find packet to ack,  */
 int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
-	//tc->seq;
-	//tc->ack;
 	struct data_ctl *dc = tc->pre_dhead->next;
 	
 	if(dc == NULL){
 		printf("ERROR: cant find the packet to ack");
 	}
 
-	printf("SSSSSSSSSSSSSSSSSS\n");
+	
 	printf("S_ACK: %x\n", ntohl(tcp->ack_seq));
 
 	struct data_ctl *previous = dc->tc->pre_dhead;
 	while(dc){
 	printf("S_expexted: %x\n", dc->expected_ack);
 		if(dc->expected_ack <= ntohl(tcp->ack_seq)){
-			send_ack(ip,tcp,dc);
+			send_ack_c2s(ip,tcp,dc);
 		
 			previous->next = dc->next;
 			free(dc);
@@ -1114,17 +1110,54 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 }
 
 
+int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
+	char *p;
+	int dlen = ntohs(ip->ip_len) - ip->ip_hl<<2 - tcp->doff>>4
+	tcp->seq = tc->p_seq;
+	tcp->ack = tc->c_seq;
+
+	struct mp_dss_44* mp = malloc(sizeof(struct mp_dss_44));
+	mp->kind = 30;
+	mp->length = 20;
+	mp->subtype = 2;
+	mp->reserved1 = 0;
+	mp->reserved2 = 0;
+	mp->F = 0;
+	mp->m = 0;
+	mp->M = 1;
+	mp->a = 0;
+	mp->A = 1;
+	mp->data_ack = tcp->ack_seq - tc->s2c_diff;
+	mp->data_seq = tcp->seq - tc->s2c_diff;
+	mp->sub_seq = 1; //TODO check
+	mp->data_level_len = htons(dlen);
+	mp->checksum = 0;//TODO checksum
+
+	char *p = (char*)tcp + (tcp->doff<<4);
+	memmove(p + mp->length,p,dlen);	
+	memcpy(p,mp,mp->length);
+
+	tcp->doff+=5;
+	ip->ip_len= htons(noths(ip->ip_len)+5));
+	
+	printf("Seq %x Ack %x Data Seq %x Data Ack %x\n",ntohl(tcp->seq),ntohl(tcp->ack_seq),ntohl(mp->data_seq),ntohl(mp->data_ack));
+	
+	//TODO Select subflow
+}
+
 int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer,int subtype){
 	int rc = DIVERT_ACCEPT;
 	int sport = ntohs(tcp->source);
 	int data_len=tcp_data_len(ip, tcp);
 //	printf("EST: Seq %d Ack %d,subtype %d\n", tcp->seq,tcp->ack_seq,subtype);
 
-	printf("Source Port %d, ack %x, subtype %d\n ",sport,ntohl(tcp->ack), subtype);
+	printf("Source Port %d, ack %x, subtype %d\n ",sport,ntohl(tcp->ack_seq), subtype);
 
-	/* tcp ->ack cant detect the state */
+
+//TODO need pass buffer in follow method for multi type(dss_44/dss_88)?
+
 	if (sport==80 && subtype == -1 && data_len>0){ // Data in S -> C (If sport=80, subtype can never = 2 because server has no mptcp option)
-//		do_output_data_s2c(tc,ip,p,tcp,buffer);
+		do_output_data_s2c(tc,ip,tcp);
 		rc = DIVERT_MODIFY;
  	}else if(sport!=80  && subtype == 2 && data_len>0){ // Data in C -> S
 		do_output_data_c2s(tc,ip,p,tcp,buffer);
@@ -1265,7 +1298,8 @@ int handle_packet(void *packet, int len, int flags)
 	checksum_packet(tc, ip, tcp);
 
 
-	print_option(packet,len);
+//	print_option(packet,len);
+	printf("New TCP Seq: %u, ACK %u", ntohl(tcp->seq), ntohl(tcp->ack_seq)); 	
 	printf("NEW TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);
 
 	return rc;

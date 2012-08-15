@@ -105,7 +105,8 @@ struct tc {
 	uint32_t		c2s_diff;		// TODO tc->diff. to implenment.  TESTED: it's fine to store negative number 
 	uint32_t		s2c_diff;		// TODO tc->diff. to implenment		in uint32_t
 
-
+	uint32_t		c_seq;
+	uint32_t		p_seq;	
 
 	/* unused, for checking first data packet */
 	uint32_t 		initial_server_seq;
