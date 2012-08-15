@@ -1014,6 +1014,7 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 		tc->pre_dhead = malloc(sizeof(struct data_ctl));
 		tc->c2s_diff = ntohl(tcp->seq) - ntohl(mp->data_seq);
 		tc->s2c_diff = ntohl(tcp->ack_seq)-ntohl(mp->data_seq);
+		tc->c_seq = tcp->seq;
 		dc->s_ack = ntohl(tcp->ack_seq);		// init ack , changed by received data in s->c
 	}
 	dc->c_seq = ntohl(tcp->seq);
@@ -1042,6 +1043,10 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	remove_mp_option(p,buffer);
 
 	printf("REMOVED\n");
+
+	/*update tc->p_seq */
+	tc->c_seq = tcp->seq;
+
 
 }
 
@@ -1077,6 +1082,8 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 			
 	printf(" >>>>>>>>>>>>>>>>SEND data ACK %x\n",ntohl(mp->data_ack)); 
 	divert_inject(ip, ntohs(ip->ip_len));
+	
+	
 	free(mp);
 }
 
@@ -1112,7 +1119,7 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 
 int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	char *p;
-	int dlen = ntohs(ip->ip_len) - ip->ip_hl<<2 - tcp->doff>>4
+	int dlen = ntohs(ip->ip_len) - ip->ip_hl<<2 - tcp->doff>>4;
 	tcp->seq = tc->p_seq;
 	tcp->ack = tc->c_seq;
 
@@ -1133,12 +1140,12 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	mp->data_level_len = htons(dlen);
 	mp->checksum = 0;//TODO checksum
 
-	char *p = (char*)tcp + (tcp->doff<<4);
+	p = (char*)tcp + (tcp->doff<<4);
 	memmove(p + mp->length,p,dlen);	
 	memcpy(p,mp,mp->length);
 
 	tcp->doff+=5;
-	ip->ip_len= htons(noths(ip->ip_len)+5));
+	ip->ip_len= htons(ntohs(ip->ip_len)+5);
 	
 	printf("Seq %x Ack %x Data Seq %x Data Ack %x\n",ntohl(tcp->seq),ntohl(tcp->ack_seq),ntohl(mp->data_seq),ntohl(mp->data_ack));
 	
