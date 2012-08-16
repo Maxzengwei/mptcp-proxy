@@ -101,9 +101,7 @@ struct tc {
 	unsigned char		SHA[20];
 	unsigned char		token_b[4];
 
-	struct data_ctl 	*pre_dhead;		// Head Pointer,real header of data be linked after this
-	uint32_t		c2s_diff;		// TODO tc->diff. to implenment.  TESTED: it's fine to store negative number 
-	uint32_t		s2c_diff;		// TODO tc->diff. to implenment		in uint32_t
+	struct conn_ctl 	*pre_dhead;		// Head Pointer,real header of data be linked after this
 
 	uint32_t		c_seq;
 	uint32_t		p_seq;	
@@ -420,6 +418,15 @@ struct data_ctl{
 	uint16_t data_len;
 	uint32_t expected_ack;
 	struct tc *tc;
+	struct data_ctl *next;
+};
+
+/* connection level data control */
+struct conn_ctl{
+	uint32_t c2s_diff;		
+	uint32_t s2c_diff;
+	uint32_t c_seq;
+	uint32_t s_ack;
 	struct data_ctl *next;
 };
 	

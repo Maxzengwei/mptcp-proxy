@@ -1008,12 +1008,14 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 	printf("OLD TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
 	struct mp_dss_44 *mp = (struct mp_dss_44*)p;
-	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
 
+
+	/* record the packet */
+	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
 	if(tc->pre_dhead == NULL){ //first subflow
 		tc->pre_dhead = malloc(sizeof(struct data_ctl));
-		tc->c2s_diff = ntohl(tcp->seq) - ntohl(mp->data_seq);
-		tc->s2c_diff = ntohl(tcp->ack_seq)-ntohl(mp->data_seq);
+		tc->pre_dhead->c2s_diff = ntohl(tcp->seq) - ntohl(mp->data_seq);
+		tc->pre_dhead->s2c_diff = ntohl(tcp->ack_seq)-ntohl(mp->data_seq);
 		tc->c_seq = tcp->seq;
 		dc->s_ack = ntohl(tcp->ack_seq);		// init ack , changed by received data in s->c
 	}
@@ -1021,10 +1023,10 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	dc->c_ack = ntohl(tcp->ack_seq);
 	dc->c_data_ack = ntohl(mp->data_ack);
 	dc->c_data_seq = ntohl(mp->data_seq);
-	dc->s_seq = ntohl(mp->data_seq) + tc->c2s_diff;
+	dc->s_seq = ntohl(mp->data_seq) + tc->pre_dhead->c2s_diff;
+	dc->s_ack = ntohl(tc->pre_dhead->s_ack);
 	dc->data_len=ntohs(mp->data_level_len);
 	dc->expected_ack=dc->s_seq+dc->data_len;
-	
 	dc->tc=tc;
 	
 	/* add to link list */	
@@ -1046,7 +1048,6 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 	/*update tc->p_seq */
 	tc->c_seq = tcp->seq;
-
 
 }
 
@@ -1083,7 +1084,6 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 	printf(" >>>>>>>>>>>>>>>>SEND data ACK %x\n",ntohl(mp->data_ack)); 
 	divert_inject(ip, ntohs(ip->ip_len));
 	
-	
 	free(mp);
 }
 
@@ -1098,16 +1098,22 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 	
 	printf("S_ACK: %x\n", ntohl(tcp->ack_seq));
 
-	struct data_ctl *previous = dc->tc->pre_dhead;
+	struct data_ctl *previous = dc;
 	while(dc){
 	printf("S_expexted: %x\n", dc->expected_ack);
 		if(dc->expected_ack <= ntohl(tcp->ack_seq)){
 			send_ack_c2s(ip,tcp,dc);
 		
-			previous->next = dc->next;
-			free(dc);
-			dc = previous->next;
-		
+			if(previous == tc->pre_dhead->next){ //first record
+				tc->pre_dhead->next = dc->next;
+				previous = dc->next;
+				free(dc);
+			}
+			else{
+				previous->next = dc->next;
+				free(dc);
+				dc = previous->next;
+			}
 		}else{
 			previous = dc;
 			dc = dc->next;
@@ -1120,9 +1126,8 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	char *p;
 	int dlen = ntohs(ip->ip_len) - ip->ip_hl<<2 - tcp->doff>>4;
-	tcp->seq = tc->p_seq;
-	tcp->ack = tc->c_seq;
 
+	/* create new mp dss option */
 	struct mp_dss_44* mp = malloc(sizeof(struct mp_dss_44));
 	mp->kind = 30;
 	mp->length = 20;
@@ -1134,24 +1139,62 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	mp->M = 1;
 	mp->a = 0;
 	mp->A = 1;
-	mp->data_ack = tcp->ack_seq - tc->s2c_diff;
-	mp->data_seq = tcp->seq - tc->s2c_diff;
+	mp->data_ack = tcp->ack_seq - tc->pre_dhead->s2c_diff;
+	mp->data_seq = tcp->seq - tc->pre_dhead->s2c_diff;
 	mp->sub_seq = 1; //TODO check
 	mp->data_level_len = htons(dlen);
 	mp->checksum = 0;//TODO checksum
 
-	p = (char*)tcp + (tcp->doff<<4);
-	memmove(p + mp->length,p,dlen);	
-	memcpy(p,mp,mp->length);
 
-	tcp->doff+=5;
-	ip->ip_len= htons(ntohs(ip->ip_len)+5);
 	
 	printf("Seq %x Ack %x Data Seq %x Data Ack %x\n",ntohl(tcp->seq),ntohl(tcp->ack_seq),ntohl(mp->data_seq),ntohl(mp->data_ack));
 	
+
+	//record the packet*/
+	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
+	dc->c_seq = ntohl(tc->p_seq);
+	dc->c_ack = ntohl(tc->c_seq);
+	dc->c_data_ack = ntohl(mp->data_ack);
+	dc->c_data_seq = ntohl(mp->data_seq);
+	dc->s_seq = ntohl(tcp->seq);
+	dc->s_ack = ntohl(tcp->ack_seq);
+	dc->data_len=dlen;
+	dc->expected_ack=dc->s_seq+dc->data_len;
+	dc->tc=tc;
+	
+	/* add to link list */	
+	if (tc->pre_dhead->next==NULL){
+		tc->pre_dhead->next = dc;
+	}
+	else
+	{
+		dc->next=tc->pre_dhead->next;
+		tc->pre_dhead->next=dc;
+	}
+
+	
+	/* modify packet */
+	tcp->seq = tc->p_seq;
+	tcp->ack_seq = tc->c_seq;
+	p = (char*)tcp + (tcp->doff<<2);
+//	memmove(p + mp->length,p,dlen);	
+//	memcpy(p,mp,mp->length);
+
+	tcp->doff+=5;
+	ip->ip_len= htons(ntohs(ip->ip_len)+5);
+
 	//TODO Select subflow
 }
 
+
+int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp){
+	struct mp_dss_44_ack *mp = (struct mp_dss_44_ack*)p;
+	
+
+
+
+
+}
 int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer,int subtype){
 	int rc = DIVERT_ACCEPT;
 	int sport = ntohs(tcp->source);
