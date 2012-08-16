@@ -407,7 +407,7 @@ struct tcpopt{
 	struct tc_subopt toc_opts[0];
 };
 
-/* host byte order */
+/* network byte order */
 struct data_ctl{
 	uint32_t c_seq;
 	uint32_t c_ack;
