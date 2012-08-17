@@ -782,16 +782,10 @@ int send_add_address(struct tc *tc, struct ip *ip2,struct tcphdr *tcp2){
 		struct tcphdr *tcp;
 		
 		int tcp_len=tcp2->doff << 2;
-
 		ip=malloc(ntohs(ip2->ip_len));
-		
-		
+			
 		memcpy(ip, ip2, ntohs(ip2->ip_len));
 		tcp = (struct tcphdr*) ((unsigned long) ip + (ip->ip_hl << 2));	
-		
-		
-		
-
 
 		in_addr_t mid;
                 short midp;
@@ -830,12 +824,9 @@ int send_add_address(struct tc *tc, struct ip *ip2,struct tcphdr *tcp2){
 		struct tcpopt *toc;
 		toc=find_opt(tcp, TCPOPT_MPTCP);
 		
-
-	
 		mptcp_remove(tc, tcp);
 		char* cp = (char *)toc;
-		memcpy(cp, mp, 8);  //TODO Modify IP length??*/
-	
+		memcpy(cp, mp, 8);  //TODO Modify IP length??*/	
 		
 		printf("\nold tcp %d--", tcp->doff);
 		tcp->doff = tcp->doff-3;
@@ -896,7 +887,7 @@ void Calulate_MAC(const char *key1, const char *key2, const char *rannum1, const
 
 
 int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
-	printf("\nIDLE: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
+	printf("\nIDLE: SYN %d ACK %d Subtype %d\n",ntohl(tcp->syn),ntohl(tcp->ack),subtype);
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == TYPE_MP_CAPABLE){
 		struct mp_capable_12* mp = (struct mp_capable_12*)p;
 		memcpy(tc->key_a, mp->sender_key,sizeof(tc->key_a));
@@ -1234,8 +1225,10 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 		printf("ERROR: cant find the packet to ack");
 	}
 
+	//printf("aaa\n");
 	printf("S_ACK: %x\n", ntohl(tcp->ack_seq));
 
+	printf("EEE\n");
 	struct data_ctl *previous = dc;
 	while(dc){
 	printf("S_expexted: %x\n", dc->expected_ack);
@@ -1377,7 +1370,7 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		do_output_data_ack_c2s(tc,ip,tcp);
 		rc = DIVERT_DROP;
 	}else if (sport!=80  && subtype == 2 &&  data_len==0){ //Data ACK in S-> C
-//		do_output_data_ack_s2c();
+		do_output_data_ack_s2c(tc,ip,p,tcp);
 		rc = DIVERT_MODIFY;
 	}	
 
