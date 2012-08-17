@@ -1186,14 +1186,12 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 */
 	
 	/* modify packet  add mp option*/
-	tcp->seq = tc->p_seq;
-	tcp->ack_seq = tc->c_seq;
+	tcp->seq = tc->p2c_seq;
+	tcp->ack_seq = tc->p2c_ack;
 	p = (char*)tcp + (tcp->doff<<2);
 
 
-	printf(">>>>>>>>A alive<<<<<<\n");
 	memmove(p + 20,p,dlen);	
-	printf(">>>>>>>>B alive<<<<<<\n");
 	memcpy(p,mp,mp->length);
 
 	tcp->doff+=5;
@@ -1206,9 +1204,14 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp){
 	struct mp_dss_44_ack *mp = (struct mp_dss_44_ack*)p;
 	
+	mptcp_remove(tc, tcp);
+
+	tcp->seq = tc->dhead->p2s_seq;
+	tcp->ack = tc->dhead->p2s_ack;
 
 
 }
+
 int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer,int subtype){
 	int rc = DIVERT_ACCEPT;
 	int sport = ntohs(tcp->source);
@@ -1362,7 +1365,7 @@ int handle_packet(void *packet, int len, int flags)
 
 
 //	print_option(packet,len);
-	printf("New TCP Seq: %u, ACK %u", ntohl(tcp->seq), ntohl(tcp->ack_seq)); 	
+	printf("New TCP Seq: %x, ACK %x", ntohl(tcp->seq), ntohl(tcp->ack_seq)); 	
 	printf("NEW TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);
 
 	return rc;
