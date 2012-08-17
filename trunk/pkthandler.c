@@ -1016,7 +1016,8 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 		tc->pre_dhead = malloc(sizeof(struct conn_ctl));
 		tc->pre_dhead->c2s_diff = tcp->seq - mp->data_seq;
 		tc->pre_dhead->s2c_diff = tcp->ack_seq - mp->data_ack;
-//		tc->_seq = tcp->seq;
+		tc->p2c_seq = tcp->ack_seq;
+		tc->p2c_ack = htonl(ntohl(tcp->seq) + ntohs(mp->data_level_len));
 	}
 
 	/* record mapping */
@@ -1206,8 +1207,8 @@ int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tc
 	
 	mptcp_remove(tc, tcp);
 
-	tcp->seq = tc->dhead->p2s_seq;
-	tcp->ack = tc->dhead->p2s_ack;
+	tcp->seq = tc->pre_dhead->p2s_seq;
+	tcp->ack = tc->pre_dhead->p2s_ack;
 
 
 }
