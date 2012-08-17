@@ -42,6 +42,14 @@ struct conn {
 	struct conn		*c_next;
 };
 
+struct active_tc {
+	
+	struct tc		*a_tc;
+	struct active_tc	*a_next;
+};
+
+struct active_tc *atc_head;
+
 /* XXX someone that knows what they're doing code a proper hash table */
 static struct conn *_connection_map[65536];
 typedef int (*opt_cb)(struct tc *tc, int tcpop, int subop, int len, void *data);
@@ -257,6 +265,23 @@ static void tc_init(struct tc *tc)
 	tc->tc_sack_disable = 1;
 	tc->tc_rto	    = 100 * 1000;/* XXX */
 	tc->pre_dhead=NULL; // TODO 1. mpjoin 2. free memory 
+	if(atc_head==NULL)
+	{
+		atc_head=malloc(sizeof(struct active_tc));
+		atc_head->a_tc=tc;
+		atc_head->a_next=NULL;
+
+	}
+	else
+	{
+		struct active_tc *new_tc;
+		new_tc=malloc(sizeof(struct active_tc));
+		new_tc->a_tc=tc;
+		new_tc->a_next=atc_head;
+		atc_head=new_tc;
+		assert(new_tc!=NULL);
+
+	}	
 }
 
 
@@ -604,7 +629,41 @@ static int ws_disable(struct tc *tc, struct tcphdr *tcp)
 
 static struct tc *find_esttc(struct tc *tc)
 {
-	return tc;
+	if (atc_head==NULL)
+		return NULL;
+	else
+	{
+		
+		struct active_tc *p;
+		p=atc_head;
+		while(p!=NULL)
+		{	
+			if (p->a_tc!=tc)
+			{
+
+			
+			unsigned long current_b=tc->token_b[0]*256*256*256+tc->token_b[1]*256*256+tc->token_b[2]*256+tc->token_b[3];
+			unsigned long p_b=p->a_tc->token_b[0]*256*256*256+p->a_tc->token_b[1]*256*256+p->a_tc->token_b[2]*256+p->a_tc->token_b[3];
+				if (current_b==p_b)
+				{
+
+					return p->a_tc;
+				}
+				else
+					p=p->a_next;
+
+
+			}
+			else
+				p=p->a_next;
+
+		}
+		
+
+		return NULL;
+
+	}
+
 
 } 
 
@@ -845,24 +904,81 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 
 	}
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == 1){ //MP JOIN
-	
-		unsigned char randomnum[4];
-		unsigned char mac[20];
-		Generate_Random_Num(randomnum,4);
 		
+
+		int i=0;
 		struct mp_join_12* mp = (struct mp_join_12*)p;
 		memcpy(tc->token_b, mp->receiver_token, 4);
-
+		
 		/* Linked list find the established tc */
 		struct tc *esttc=find_esttc(tc);
-		if (esttc)
+		if (esttc!=NULL)
 		{
+
+			
+
+			printf("aaaaaaaaaaaaaaaaaaaa-------------------------bbbbbbbbbbbbbbbbbb");
+			unsigned char randomnum[4];
+			unsigned char randomseq[4];
+		        unsigned char mac[20];
+		        Generate_Random_Num(randomnum,4);
+				
+			printf("\nSecond Ran is: ");
+ 			for(i = 0; i < 4; i++){
+		
+				printf("%02x ", randomnum[i]);
+			}
+			//Generate_Random_Num(randomseq,4);
 			tc->tc_state=STATE_SUB_SYNACK_SENT;
+
+			printf("\nKey a is: ");
+			 for(i = 0; i < 8; i++){
+		
+				printf("%02x ", esttc->key_a[i]);
+			}
+			printf("\nKey b is: ");
+			 for(i = 0; i < 8; i++){
+		
+				printf("%02x ", esttc->key_b[i]);
+			}
+
 			memcpy(tc->key_a,esttc->key_a,8);
 			memcpy(tc->key_b,esttc->key_b,8);
 			memcpy(tc->token_b,esttc->token_b,4);
 			Calulate_MAC(tc->key_b, tc->key_a, randomnum, mp->sender_number, mac);
-			header_switch(ip,tcp);
+			printf("\n MAC is");
+			for(i=0;i<20;i++)
+        		{
+           			printf("%02x ", mac[i]);
+
+
+        		}
+
+			printf("\n");
+			tcp->syn=1;
+                	tcp->ack=1;
+
+			in_addr_t mid;
+                	short midp;
+			unsigned long mids; 
+                
+                	//Switch port
+                	midp=tcp->source;
+                	tcp->source=tcp->dest;
+                	tcp->dest=midp;
+               	
+                	//Switch Address
+                	mid=ip->ip_src.s_addr;
+               	 	ip->ip_src.s_addr=ip->ip_dst.s_addr;
+                	ip->ip_dst.s_addr=mid;
+						
+
+
+			
+			mids=tcp->seq;			        
+		        tcp->ack_seq=htonl(ntohl(mids)+1);
+			
+			tcp->seq=htonl(randomseq[0]*256*256*256+randomseq[1]*256*256+randomseq[2]*256+randomseq[3]);
 
 			struct mp_join_16 *mpj=malloc(sizeof (struct mp_join_16));
 			mpj->kind=30;
@@ -870,17 +986,21 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 			mpj->subtype=1;
 			mpj->address=mp->address;
 			memcpy(mpj->sender_mac,mac,8);
-			memcpy(mpj->sender_number,randomnum,8);
+			memcpy(mpj->sender_number,randomnum,4);
 			memcpy(p,mpj,16);
-			tcp->syn=1;
-                	tcp->ack=1;
 			
-			set_ip_len(ip, ntohs(ip->ip_len)+4);
-			tcp->doff+= 4 >> 2;
+
 			
+			tcp->doff+= 1;
+			ip->ip_len=htons(ntohs(ip->ip_len)+4);
+
+			
+			
+
+			print_option(ip,0);
 			checksum_packet(tc, ip, tcp);
 			divert_inject(ip, ntohs(ip->ip_len));
-			
+			//abort();
 			return DIVERT_DROP;	
 			
 		}
@@ -952,7 +1072,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == 0){
 		printf(">>>>>>>REMOVE\n");
-		//send_add_address(tc, ip, tcp);
+		send_add_address(tc, ip, tcp);
 		mptcp_remove(tc, tcp);
 		
 		tcp->doff = tcp->doff - 5;
@@ -977,6 +1097,11 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 
 int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
 
+	if (ip->ip_src.s_addr==_conf.host_addr.s_addr)
+	{
+		return DIVERT_ACCEPT;
+
+	}
 
 	if(tcp->ack == 1 && subtype == -1){
 		tc->tc_state = STATE_PROXY_OFF;
@@ -994,7 +1119,9 @@ int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr 
 	}
 	if (tcp->ack==1 && subtype==1)
 	{
+		printf("--------------I'm here!!!-----------------");
 		struct mp_join_24 *mp= (struct mp_join_24*)p;
+		tc->tc_state=STATE_INITEST;
 		// Send ACK with DATA ACK
 		return DIVERT_DROP;
 
