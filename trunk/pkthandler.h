@@ -103,8 +103,8 @@ struct tc {
 
 	struct conn_ctl 	*pre_dhead;		// Head Pointer,real header of data be linked after this
 
-	uint32_t		c_seq;
-	uint32_t		p_seq;	
+	uint32_t		p2c_seq;
+	uint32_t		p2c_ack;	
 
 	/* unused, for checking first data packet */
 	uint32_t 		initial_server_seq;
@@ -425,8 +425,8 @@ struct data_ctl{
 struct conn_ctl{
 	uint32_t c2s_diff;		
 	uint32_t s2c_diff;
-	uint32_t c_seq;
-	uint32_t s_ack;
+	uint32_t p2s_seq;
+	uint32_t p2s_ack;
 	struct data_ctl *next;
 };
 	
