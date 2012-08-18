@@ -280,6 +280,7 @@ static void tc_init(struct tc *tc)
 		new_tc->a_next=atc_head;
 		atc_head=new_tc;
 		assert(new_tc!=NULL);
+		assert(tc->tc_state == STATE_IDLE);
 
 	}	
 }
@@ -895,7 +896,7 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 
 	}
 
-	return DIVERT_MODIFY;
+	
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == 1){ //MP JOIN
 		
 
@@ -908,32 +909,19 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		if (esttc!=NULL)
 		{
 
+			tc->tc_state=STATE_SUB_SYNACK_SENT;
+			tc->mainflowtc=esttc;
+			tc->pre_dhead=esttc->pre_dhead;
 			
 
 			printf("aaaaaaaaaaaaaaaaaaaa-------------------------bbbbbbbbbbbbbbbbbb");
 			unsigned char randomnum[4];
 			unsigned char randomseq[4];
 		        unsigned char mac[20];
-		        Generate_Random_Num(randomnum,4);
-				
-			printf("\nSecond Ran is: ");
- 			for(i = 0; i < 4; i++){
-		
-				printf("%02x ", randomnum[i]);
-			}
-			//Generate_Random_Num(randomseq,4);
-			tc->tc_state=STATE_SUB_SYNACK_SENT;
+		        Generate_Random_Num(randomnum,4);	
+			Generate_Random_Num(randomseq,4);
+			
 
-			printf("\nKey a is: ");
-			 for(i = 0; i < 8; i++){
-		
-				printf("%02x ", esttc->key_a[i]);
-			}
-			printf("\nKey b is: ");
-			 for(i = 0; i < 8; i++){
-		
-				printf("%02x ", esttc->key_b[i]);
-			}
 
 			memcpy(tc->key_a,esttc->key_a,8);
 			memcpy(tc->key_b,esttc->key_b,8);
@@ -972,6 +960,9 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		        tcp->ack_seq=htonl(ntohl(mids)+1);
 			
 			tcp->seq=htonl(randomseq[0]*256*256*256+randomseq[1]*256*256+randomseq[2]*256+randomseq[3]);
+
+
+
 
 			struct mp_join_16 *mpj=malloc(sizeof (struct mp_join_16));
 			mpj->kind=30;
@@ -1065,7 +1056,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == 0){
 		printf(">>>>>>>REMOVE\n");
-//		send_add_address(tc, ip, tcp);
+		send_add_address(tc, ip, tcp);
 		mptcp_remove(tc, tcp);
 		
 		tcp->doff = tcp->doff - 5;
@@ -1092,6 +1083,9 @@ int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr 
 
 	if (ip->ip_src.s_addr==_conf.host_addr.s_addr)
 	{
+
+		printf("************8I'm here!!!!!!**************");
+		
 		return DIVERT_ACCEPT;
 
 	}
@@ -1110,16 +1104,19 @@ int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr 
 		
 		return DIVERT_DROP;
 	}
-	if (tcp->ack==1 && subtype==1)
+	if (tcp->syn==0 && tcp->ack==1 && subtype==1)
 	{
+
+		tc->p2c_seq=ntohl(tcp->ack);
+		tc->p2c_ack=ntohl(tcp->seq);
 		printf("--------------I'm here!!!-----------------");
 		struct mp_join_24 *mp= (struct mp_join_24*)p;
-		tc->tc_state=STATE_INITEST;
-		// Send ACK with DATA ACK
+		tc->tc_state=STATE_JOINED;
+		
 		return DIVERT_DROP;
 
 	}
-	return DIVERT_DROP;
+	return DIVERT_ACCEPT;
 
 }
 
@@ -1139,10 +1136,12 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 		tc->pre_dhead->p2s_ack = 0; //minimum number 
 		
 
-		tc->p2c_seq = ntohl(tcp->ack_seq);	// TODO each subflow init 
-		tc->p2c_ack = ntohl(tcp->seq) + ntohs(mp->data_level_len);	//TODO each subflow init
+		//tc->p2c_seq = ntohl(tcp->ack_seq);	// TODO each subflow init 
+		//tc->p2c_ack = ntohl(tcp->seq) + ntohs(mp->data_level_len);	//TODO each subflow init
 	}
 
+	tc->p2c_seq = ntohl(tcp->ack_seq);	// TODO each subflow init
+	tc->p2c_ack = ntohl(tcp->seq) + ntohs(mp->data_level_len);
 	/* record mapping */
 	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
 	dc->c_seq = ntohl(tcp->seq);
@@ -1171,6 +1170,10 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	/* modify the packet */
 	tcp->seq= htonl(dc->s_seq);
 	tcp->ack_seq= htonl(dc->s_ack);
+
+	//if (tc->tc_state==STATE_JOINED)
+	//	ip->ip_dst.s_addr=
+	
 	printf("New TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
 	remove_mp_option(p,buffer);
 
@@ -1182,6 +1185,8 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 	/* modify packet */
 	tcp->seq = htonl(dc->c_ack);
 	tcp->ack_seq = htonl(dc->c_seq + dc->data_len);
+	dc->tc->p2c_seq = ntohl(tcp->seq);
+	dc->tc->p2c_ack = ntohl(tcp->ack_seq);
 
 	/* add mp option */
 	struct mp_dss_44_ack *mp = malloc(sizeof(struct mp_dss_44_ack));
@@ -1197,7 +1202,7 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 	mp->A = 1;
 	mp->data_ack = htonl(dc->c_data_seq + dc->data_len);
 	
-	/* modify lenght */
+	/* modify lenghth */
 	u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 	int option_len = (tcp->doff-5) << 2;
 	ptr+=option_len;
@@ -1313,10 +1318,13 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	
 	/* modify packet  add mp option*/
 	tcp->seq = htonl(tc->p2c_seq);
-	tcp->ack_seq = htonl(tc->p2c_ack);
-	p = (char*)tcp + (tcp->doff<<2);
+	
+	
 	tc->p2c_seq = tc->p2c_seq + dlen;
-
+	
+	tcp->ack_seq = htonl(tc->p2c_ack);
+	
+	p = (char*)tcp + (tcp->doff<<2);
 	memmove(p + 20,p,dlen);	
 	memcpy(p,mp,mp->length);
 
@@ -1331,20 +1339,24 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp){
 	printf("=====Data ACK s2c=====\n");
 	struct mp_dss_44_ack *mp = (struct mp_dss_44_ack*)p;
-
+	assert(p!=NULL);
 
 	/*update value*/
-	uint32_t current = ntohl(mp->data_ack) + tc->pre_dhead->s2c_diff;
-	if(current>tc->pre_dhead->p2s_ack){
-		tc->pre_dhead->p2s_ack = current;
+	if (tc->pre_dhead==NULL)
+		return DIVERT_DROP;
+	else
+	{
+		uint32_t current = ntohl(mp->data_ack) + tc->pre_dhead->s2c_diff;
+		if(current>tc->pre_dhead->p2s_ack){
+			tc->pre_dhead->p2s_ack = current;
+		}
+		tc->p2c_ack = ntohl(tcp->seq);
+
+		/* modify packet */
+		mptcp_remove(tc, tcp);
+		tcp->seq = htonl(tc->pre_dhead->p2s_seq);
+		tcp->ack_seq = htonl(tc->pre_dhead->p2s_ack);
 	}
-	tc->p2c_ack = ntohl(tcp->ack_seq);
-
-	/* modify packet */
-	mptcp_remove(tc, tcp);
-	tcp->seq = htonl(tc->pre_dhead->p2s_seq);
-	tcp->ack = htonl(tc->pre_dhead->p2s_ack);
-
 
 
 }
@@ -1370,7 +1382,7 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		do_output_data_ack_c2s(tc,ip,tcp);
 		rc = DIVERT_DROP;
 	}else if (sport!=80  && subtype == 2 &&  data_len==0){ //Data ACK in S-> C
-		do_output_data_ack_s2c(tc,ip,p,tcp);
+		do_output_data_ack_s2c(tc, ip, p, tcp);
 		rc = DIVERT_MODIFY;
 	}	
 
@@ -1405,6 +1417,17 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 	
 
 	case(STATE_INITEST):
+
+		if ((subtype!=-1)&&(subtype!=2))
+		{
+			
+	  		return DIVERT_ACCEPT;
+		}	
+			
+		rc = do_output_data(tc,ip,p,tcp,buffer,subtype);
+			break;
+
+	case(STATE_JOINED):
 		rc = do_output_data(tc,ip,p,tcp,buffer,subtype);
 		break;
 
