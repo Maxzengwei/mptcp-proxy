@@ -102,7 +102,8 @@ struct tc {
 	unsigned char		token_b[4];
 
 	struct conn_ctl 	*pre_dhead;		// Head Pointer,real header of data be linked after this
-
+	struct tc 		*mainflowtc;
+	
 	uint32_t		p2c_seq;
 	uint32_t		p2c_ack;	
 
