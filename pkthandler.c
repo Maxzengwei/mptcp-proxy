@@ -887,13 +887,15 @@ void Calulate_MAC(const char *key1, const char *key2, const char *rannum1, const
 
 
 int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffer, int subtype){
-	printf("\nIDLE: SYN %d ACK %d Subtype %d\n",ntohl(tcp->syn),ntohl(tcp->ack),subtype);
+	printf("\nIDLE: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == TYPE_MP_CAPABLE){
 		struct mp_capable_12* mp = (struct mp_capable_12*)p;
 		memcpy(tc->key_a, mp->sender_key,sizeof(tc->key_a));
 		tc->tc_state = STATE_SYN_SENT;
 
 	}
+
+	return DIVERT_MODIFY;
 	if(tcp->syn == 1 && tcp->ack == 0 && subtype == 1){ //MP JOIN
 		
 
@@ -1063,7 +1065,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == 0){
 		printf(">>>>>>>REMOVE\n");
-		send_add_address(tc, ip, tcp);
+//		send_add_address(tc, ip, tcp);
 		mptcp_remove(tc, tcp);
 		
 		tcp->doff = tcp->doff - 5;
@@ -1225,10 +1227,8 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 		printf("ERROR: cant find the packet to ack");
 	}
 
-	//printf("aaa\n");
 	printf("S_ACK: %x\n", ntohl(tcp->ack_seq));
 
-	printf("EEE\n");
 	struct data_ctl *previous = dc;
 	while(dc){
 	printf("S_expexted: %x\n", dc->expected_ack);
@@ -1284,7 +1284,7 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	mp->checksum = 0;//TODO checksum
 
 
-	
+
 	printf("Seq %x Ack %x Data Seq %x Data Ack %x\n",ntohl(tcp->seq),ntohl(tcp->ack_seq),ntohl(mp->data_seq),ntohl(mp->data_ack));
 	
 /*
