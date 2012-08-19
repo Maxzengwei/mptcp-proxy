@@ -912,8 +912,8 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 			tc->tc_state=STATE_SUB_SYNACK_SENT;
 			tc->mainflowtc=esttc;
 			tc->pre_dhead=esttc->pre_dhead;
-			
-
+			tc->tc_dst_ip=esttc->tc_dst_ip;
+			tc->tc_dst_port=esttc->tc_dst_port;
 			printf("aaaaaaaaaaaaaaaaaaaa-------------------------bbbbbbbbbbbbbbbbbb");
 			unsigned char randomnum[4];
 			unsigned char randomseq[4];
@@ -1106,6 +1106,10 @@ int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr 
 	}
 	if (tcp->syn==0 && tcp->ack==1 && subtype==1)
 	{
+			
+
+		tc->tc_src_ip.s_addr=ip->ip_src.s_addr;
+		tc->tc_src_port=tcp->source;
 
 		tc->p2c_seq=ntohl(tcp->ack);
 		tc->p2c_ack=ntohl(tcp->seq);
@@ -1171,13 +1175,35 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	tcp->seq= htonl(dc->s_seq);
 	tcp->ack_seq= htonl(dc->s_ack);
 
-	//if (tc->tc_state==STATE_JOINED)
-	//	ip->ip_dst.s_addr=
-	
 	printf("New TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
 	remove_mp_option(p,buffer);
 
+	if (tc->tc_state==STATE_JOINED){
+		
+		ip->ip_dst.s_addr=tc->tc_dst_ip.s_addr;
+		tcp->dest=tc->tc_dst_port;
 
+		ip->ip_src.s_addr=tc->mainflowtc->tc_src_ip.s_addr;
+		tcp->source=tc->mainflowtc->tc_src_port;
+
+		xprintf(XP_ALWAYS, "\n\nSUCK   %s:%d",
+                	inet_ntoa(ip->ip_src),
+                	ntohs(tcp->source));
+       		xprintf(XP_ALWAYS, "->%s:%d \n",
+                	inet_ntoa(ip->ip_dst),
+                	ntohs(tcp->dest));
+
+		checksum_packet(tc, ip, tcp);
+		divert_inject(ip, ntohs(ip->ip_len));
+		
+		return DIVERT_DROP;
+		//abort();
+		
+	}
+	
+
+	return DIVERT_MODIFY;
+	
 }
 
 int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
@@ -1207,13 +1233,32 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 	int option_len = (tcp->doff-5) << 2;
 	ptr+=option_len;
  	memcpy(ptr,mp,mp->length);  
+	printf(" >>>SEND data ACK>>>>>> %x\n",ntohl(mp->data_ack)); 
+
+	if (dc->tc->tc_state==STATE_JOINED)
+	{
+		printf(" SUCKKKKKKKKKKKKKKKKKKKKKKk\n");
+		ip->ip_dst.s_addr=dc->tc->tc_src_ip.s_addr;
+		ip->ip_src.s_addr=_conf.host_addr.s_addr;
+		tcp->dest=dc->tc->tc_src_port;
+		xprintf(XP_ALWAYS, "\n\n1.   %s:%d",
+                	inet_ntoa(ip->ip_src),
+                	ntohs(tcp->source));
+       		xprintf(XP_ALWAYS, "->%s:%d \n",
+                	inet_ntoa(ip->ip_dst),
+                	ntohs(tcp->dest));
+		
+
+	}	
+
+
 	tcp->doff += 2;
 	ip->ip_len = htons(ntohs(ip->ip_len)+8);
 			
 	checksum_packet(dc->tc, ip, tcp);
 	
 			
-	printf(" >>>SEND data ACK>>>>>> %x\n",ntohl(mp->data_ack)); 
+	
 	divert_inject(ip, ntohs(ip->ip_len));
 	
 	free(mp);
@@ -1376,8 +1421,8 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		do_output_data_s2c(tc,ip,tcp);
 		rc = DIVERT_MODIFY;
  	}else if(sport!=80  && subtype == 2 && data_len>0){ // Data in C -> S
-		do_output_data_c2s(tc,ip,p,tcp,buffer);
-		rc = DIVERT_MODIFY;
+		rc = do_output_data_c2s(tc,ip,p,tcp,buffer);
+		
 	}else if (sport==80  && subtype == -1 && data_len==0){ //Data ACK in C-> S 
 		do_output_data_ack_c2s(tc,ip,tcp);
 		rc = DIVERT_DROP;
@@ -1428,6 +1473,12 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 			break;
 
 	case(STATE_JOINED):
+
+		if ((subtype!=-1)&&(subtype!=2))
+		{
+			
+	  		return DIVERT_ACCEPT;
+		}
 		rc = do_output_data(tc,ip,p,tcp,buffer,subtype);
 		break;
 
@@ -1488,15 +1539,7 @@ int handle_packet(void *packet, int len, int flags)
         //tc->tc_dir_packet = (flags & DF_IN) ? DIR_IN : DIR_OUT;
 	//tc->tc_csum       = 0;
 
-	if (_conf.host_addr.s_addr!=0)
-	{
 
-		if (!(flags & DF_IN))
-
-			return DIVERT_MODIFY;
-
-
-	}
 
 	print_packet(ip, tcp, flags, tc);
   	int option_len = (tcp->doff-5) << 2;
@@ -1526,6 +1569,21 @@ int handle_packet(void *packet, int len, int flags)
 			buffer = malloc(mptcp_option_len);
 			memcpy(buffer,p,mptcp_option_len);
 			subtype = (buffer[2]&0xf0)>>4;
+		}
+	}
+
+	if (_conf.host_addr.s_addr!=0)
+	{
+
+		
+
+		if (!(flags & DF_IN))
+		{
+	
+
+
+			return DIVERT_MODIFY;
+
 		}
 	}
 
