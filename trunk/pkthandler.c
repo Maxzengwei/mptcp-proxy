@@ -1282,7 +1282,7 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	mp->M = 1;
 	mp->a = 0;
 	mp->A = 1;
-	mp->data_ack = htonl(ntohl(tcp->ack_seq) - tc->pre_dhead->s2c_diff);
+	mp->data_ack = htonl(ntohl(tcp->ack_seq) - tc->pre_dhead->c2s_diff);
 	mp->data_seq = htonl(ntohl(tcp->seq) - tc->pre_dhead->s2c_diff);
 	mp->sub_seq = htonl((ntohl(tcp->seq) - tc->pre_dhead->s2c_diff- tc->initial_server_data_seq)); //TODO check
 	mp->data_level_len = htons(dlen);
@@ -1485,9 +1485,18 @@ int handle_packet(void *packet, int len, int flags)
 		
 	}
 		
-        tc->tc_dir_packet = (flags & DF_IN) ? DIR_IN : DIR_OUT;
-	tc->tc_csum       = 0;
+        //tc->tc_dir_packet = (flags & DF_IN) ? DIR_IN : DIR_OUT;
+	//tc->tc_csum       = 0;
 
+	if (_conf.host_addr.s_addr!=0)
+	{
+
+		if (!(flags & DF_IN))
+
+			return DIVERT_MODIFY;
+
+
+	}
 
 	print_packet(ip, tcp, flags, tc);
   	int option_len = (tcp->doff-5) << 2;
