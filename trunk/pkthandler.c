@@ -42,11 +42,7 @@ struct conn {
 	struct conn		*c_next;
 };
 
-struct active_tc {
-	
-	struct tc		*a_tc;
-	struct active_tc	*a_next;
-};
+
 
 struct active_tc *atc_head;
 
@@ -1111,8 +1107,30 @@ int do_output_sub_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr 
 		tc->tc_src_ip.s_addr=ip->ip_src.s_addr;
 		tc->tc_src_port=tcp->source;
 
-		tc->p2c_seq=ntohl(tcp->ack);
+		tc->p2c_seq=ntohl(tcp->ack_seq);
 		tc->p2c_ack=ntohl(tcp->seq);
+		
+		tc->initial_client_seq=tcp->seq;
+		tc->initial_server_seq=tcp->ack_seq;
+
+		assert(tc->pre_dhead!=NULL);
+		if (tc->pre_dhead->a_head==NULL)
+		{
+			tc->pre_dhead->a_head->a_tc=tc;
+			tc->pre_dhead->a_head->a_next=NULL;
+		}
+		else
+		{
+			struct active_tc *new_tc;
+			new_tc=malloc(sizeof(struct active_tc));
+			new_tc->a_tc=tc;
+			new_tc->a_next=tc->pre_dhead->a_head;
+			tc->pre_dhead->a_head=new_tc;
+			
+
+
+		}
+		
 		printf("--------------I'm here!!!-----------------");
 		struct mp_join_24 *mp= (struct mp_join_24*)p;
 		tc->tc_state=STATE_JOINED;
@@ -1138,6 +1156,10 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 		tc->pre_dhead->c2s_diff = ntohl(tcp->seq) - ntohl(mp->data_seq);
 		tc->pre_dhead->s2c_diff = ntohl(tcp->ack_seq) - ntohl(mp->data_ack);
 		tc->pre_dhead->p2s_ack = 0; //minimum number 
+		tc->pre_dhead->a_head=malloc(sizeof(struct active_tc));
+		tc->pre_dhead->a_head->a_tc=tc;
+		tc->pre_dhead->a_head->a_next=NULL;	
+		tc->pre_dhead->last_used_tc=tc->pre_dhead->a_head;	
 		
 
 		//tc->p2c_seq = ntohl(tcp->ack_seq);	// TODO each subflow init 
@@ -1186,7 +1208,7 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 		ip->ip_src.s_addr=tc->mainflowtc->tc_src_ip.s_addr;
 		tcp->source=tc->mainflowtc->tc_src_port;
 
-		xprintf(XP_ALWAYS, "\n\nSUCK   %s:%d",
+		xprintf(XP_ALWAYS, "\n\nHere   %s:%d",
                 	inet_ntoa(ip->ip_src),
                 	ntohs(tcp->source));
        		xprintf(XP_ALWAYS, "->%s:%d \n",
@@ -1237,7 +1259,7 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 
 	if (dc->tc->tc_state==STATE_JOINED)
 	{
-		printf(" SUCKKKKKKKKKKKKKKKKKKKKKKk\n");
+		
 		ip->ip_dst.s_addr=dc->tc->tc_src_ip.s_addr;
 		ip->ip_src.s_addr=_conf.host_addr.s_addr;
 		tcp->dest=dc->tc->tc_src_port;
@@ -1275,6 +1297,7 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 	
 	if(dc == NULL){
 		printf("ERROR: cant find the packet to ack");
+		return 0;
 	}
 
 	printf("S_ACK: %x\n", ntohl(tcp->ack_seq));
@@ -1311,9 +1334,25 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	char *p;
 	int dlen = ntohs(ip->ip_len) - (ip->ip_hl<<2) - (tcp->doff<<2);
 
-	/* update value*/
+	/* find subflow*/
+	assert(tc->pre_dhead!=NULL);
 	tc->pre_dhead->p2s_seq = ntohl(tcp->ack_seq);
 	
+	assert(tc->pre_dhead!=NULL);
+	assert(tc->pre_dhead->last_used_tc!=NULL);
+	assert(tc->pre_dhead->last_used_tc->a_tc!=NULL);
+	struct tc *usedtc = tc->pre_dhead->last_used_tc->a_tc;
+	assert(usedtc!=NULL);
+	if (tc->pre_dhead->last_used_tc->a_next==NULL)
+		tc->pre_dhead->last_used_tc=tc->pre_dhead->a_head;
+	else
+		tc->pre_dhead->last_used_tc=tc->pre_dhead->last_used_tc->a_next;
+
+	assert(tc->pre_dhead->last_used_tc!=NULL);
+
+	
+
+
 	
 	/* add new mp dss option */
 	struct mp_dss_44* mp = malloc(sizeof(struct mp_dss_44));
@@ -1329,7 +1368,13 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	mp->A = 1;
 	mp->data_ack = htonl(ntohl(tcp->ack_seq) - tc->pre_dhead->c2s_diff);
 	mp->data_seq = htonl(ntohl(tcp->seq) - tc->pre_dhead->s2c_diff);
-	mp->sub_seq = htonl((ntohl(tcp->seq) - tc->pre_dhead->s2c_diff- tc->initial_server_data_seq)); //TODO check
+
+	/* update value */
+	tcp->seq = htonl(usedtc->p2c_seq);		// Order Changed for Multiple Subflow usage;
+	usedtc->p2c_seq = usedtc->p2c_seq + dlen;
+	tcp->ack_seq = htonl(usedtc->p2c_ack);
+
+	mp->sub_seq = htonl(ntohl(tcp->seq) - ntohl(usedtc->initial_server_seq)+1); //TODO check
 	mp->data_level_len = htons(dlen);
 	mp->checksum = 0;//TODO checksum
 
@@ -1361,13 +1406,22 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	}
 */
 	
+	
+
+	
+
+	if (usedtc->tc_state==STATE_JOINED)
+	{
+
+		ip->ip_dst.s_addr=usedtc->tc_src_ip.s_addr;
+		ip->ip_src.s_addr=_conf.host_addr.s_addr;
+		tcp->dest=usedtc->tc_src_port;
+
+
+	}
+
 	/* modify packet  add mp option*/
-	tcp->seq = htonl(tc->p2c_seq);
-	
-	
-	tc->p2c_seq = tc->p2c_seq + dlen;
-	
-	tcp->ack_seq = htonl(tc->p2c_ack);
+
 	
 	p = (char*)tcp + (tcp->doff<<2);
 	memmove(p + 20,p,dlen);	
@@ -1375,8 +1429,8 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 
 	tcp->doff+=5;
 	ip->ip_len= htons(ntohs(ip->ip_len)+20);
-
-	//TODO Select subflow
+	checksum_packet(usedtc, ip, tcp);
+	
 
 }
 
@@ -1403,6 +1457,30 @@ int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tc
 		tcp->ack_seq = htonl(tc->pre_dhead->p2s_ack);
 	}
 
+	if (tc->tc_state==STATE_JOINED){
+		
+		ip->ip_dst.s_addr=tc->tc_dst_ip.s_addr;
+		tcp->dest=tc->tc_dst_port;
+
+		ip->ip_src.s_addr=tc->mainflowtc->tc_src_ip.s_addr;
+		tcp->source=tc->mainflowtc->tc_src_port;
+
+		xprintf(XP_ALWAYS, "\n\nHere2   %s:%d",
+                	inet_ntoa(ip->ip_src),
+                	ntohs(tcp->source));
+       		xprintf(XP_ALWAYS, "->%s:%d \n",
+                	inet_ntoa(ip->ip_dst),
+                	ntohs(tcp->dest));
+
+		checksum_packet(tc, ip, tcp);
+		divert_inject(ip, ntohs(ip->ip_len));
+		
+		
+		//abort();
+		return DIVERT_DROP;
+		
+	}
+	return DIVERT_MODIFY;
 
 }
 
@@ -1427,8 +1505,8 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		do_output_data_ack_c2s(tc,ip,tcp);
 		rc = DIVERT_DROP;
 	}else if (sport!=80  && subtype == 2 &&  data_len==0){ //Data ACK in S-> C
-		do_output_data_ack_s2c(tc, ip, p, tcp);
-		rc = DIVERT_MODIFY;
+		rc=do_output_data_ack_s2c(tc, ip, p, tcp);
+		
 	}	
 
 	return rc;
@@ -1537,7 +1615,7 @@ int handle_packet(void *packet, int len, int flags)
 	}
 		
         //tc->tc_dir_packet = (flags & DF_IN) ? DIR_IN : DIR_OUT;
-	//tc->tc_csum       = 0;
+	tc->tc_csum       = 0;
 
 
 
