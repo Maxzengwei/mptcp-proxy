@@ -407,8 +407,12 @@ struct tcpopt{
 	uint8_t		 toc_len;
 	struct tc_subopt toc_opts[0];
 };
-
-/* network byte order */
+struct active_tc {
+	
+	struct tc		*a_tc;
+	struct active_tc	*a_next;
+};
+/* host byte order */
 struct data_ctl{
 	uint32_t c_seq;
 	uint32_t c_ack;
@@ -428,7 +432,9 @@ struct conn_ctl{
 	uint32_t s2c_diff;
 	uint32_t p2s_seq;
 	uint32_t p2s_ack;
-	struct data_ctl *next;
+	struct data_ctl  *next;
+	struct active_tc *a_head;
+	struct active_tc *last_used_tc;
 };
 	
 
