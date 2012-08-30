@@ -1008,9 +1008,9 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
 
-    if (Generate_Random_Key(tc)){
+        if(Generate_Random_Key(tc)){
 		 
-			struct mp_capable_12 *mp;
+            struct mp_capable_12 *mp;
 			mp = malloc(sizeof(struct mp_capable_12)); 
 			mp->kind = 30;
 			mp->length = 12;
@@ -1019,10 +1019,10 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 			mp->reserved = 0x01;                     
 			memcpy(mp->sender_key,tc->key_b,sizeof(mp->sender_key));
 					
-  		u_char* ptr = (u_char *)tcp + sizeof(*tcp);
+            u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 			int option_len = (tcp->doff-5) << 2;
 			ptr+=option_len;
- 		 memcpy(ptr,mp,12);  
+            memcpy(ptr,mp,12);  
 	
 			tcp->doff += 3;
 			ip->ip_len = htons(ntohs(ip->ip_len)+12);
