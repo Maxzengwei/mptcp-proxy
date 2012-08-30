@@ -290,7 +290,6 @@ static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 	{
 			
 			tc->initial_client_seq=tcp->seq+1;
-		
 			tc->tc_src_ip.s_addr=ip->ip_src.s_addr;
 			tc->tc_src_port=tcp->source;
 			tc->tc_dst_ip.s_addr=ip->ip_dst.s_addr;
@@ -910,7 +909,6 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 			tc->pre_dhead=esttc->pre_dhead;
 			tc->tc_dst_ip=esttc->tc_dst_ip;
 			tc->tc_dst_port=esttc->tc_dst_port;
-			printf("aaaaaaaaaaaaaaaaaaaa-------------------------bbbbbbbbbbbbbbbbbb");
 			unsigned char randomnum[4];
 			unsigned char randomseq[4];
 		        unsigned char mac[20];
@@ -974,8 +972,6 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 			tcp->doff+= 1;
 			ip->ip_len=htons(ntohs(ip->ip_len)+4);
 
-			
-			
 
 			print_option(ip,0);
 			checksum_packet(tc, ip, tcp);
@@ -1382,30 +1378,7 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 
 	printf("Seq %x Ack %x Data Seq %x Data Ack %x\n",ntohl(tcp->seq),ntohl(tcp->ack_seq),ntohl(mp->data_seq),ntohl(mp->data_ack));
 	
-/*
-	//record the packet
-	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
-	dc->c_seq = ntohl(tc->p_seq);
-	dc->c_ack = ntohl(tc->c_seq);
-	dc->c_data_ack = ntohl(mp->data_ack);
-	dc->c_data_seq = ntohl(mp->data_seq);
-	dc->s_seq = ntohl(tcp->seq);
-	dc->s_ack = ntohl(tcp->ack_seq);
-	dc->data_len=dlen;
-	dc->expected_ack=dc->s_seq+dc->data_len;
-	dc->tc=tc;
-	
-	/* add to link list 
-	if (tc->pre_dhead->next==NULL){
-		tc->pre_dhead->next = dc;
-	}
-	else
-	{
-		dc->next=tc->pre_dhead->next;
-		tc->pre_dhead->next=dc;
-	}
-*/
-	
+
 	
 
 	
@@ -1533,28 +1506,22 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 		rc = do_output_sub_synack_sent(tc,ip,p,tcp,buffer,subtype);
 		break;
 
-
 	case(STATE_PROXY_OFF):
 		rc = DIVERT_ACCEPT;
 		break;
 	
-
 	case(STATE_INITEST):
-
 		if ((subtype!=-1)&&(subtype!=2))
 		{
-			
 	  		return DIVERT_ACCEPT;
 		}	
 			
 		rc = do_output_data(tc,ip,p,tcp,buffer,subtype);
-			break;
+		break;
 
 	case(STATE_JOINED):
-
 		if ((subtype!=-1)&&(subtype!=2))
-		{
-			
+		{			
 	  		return DIVERT_ACCEPT;
 		}
 		rc = do_output_data(tc,ip,p,tcp,buffer,subtype);
@@ -1565,27 +1532,21 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 		break;
 	}
 
-	free(buffer);
-	
+	free(buffer);	
 	return rc;
 }
 
 int handle_packet(void *packet, int len, int flags)
-{
-
-        
+{      
 	struct ip *ip = packet;
         struct tc *tc;
 	struct tcphdr *tcp;
-
 	int rc=DIVERT_MODIFY;
+
 	if (ntohs(ip->ip_len) != len)
-		{
-                       
+		{        
 			xprintf(XP_ALWAYS, "Bad packet\n");
 			return DIVERT_ACCEPT; /* kernel will drop / deal with it */
-
-
 		}
 
 	if (ip->ip_p != IPPROTO_TCP)
@@ -1600,42 +1561,23 @@ int handle_packet(void *packet, int len, int flags)
 			return DIVERT_ACCEPT; /* kernel will drop / deal with it */
 
 		}
+
         tc = lookup_connection(ip, tcp, flags);
         /* new connection */
 	if (!tc) {
-		/*if (tcp->th_flags != TH_SYN) {
-			xprintf(XP_NOISY, "Ignoring established connection: ");
-			print_packet(ip, tcp, flags);
-
-			return DIVERT_ACCEPT;
-		}*/
-
-		tc = new_connection(ip, tcp, flags);
-		
+		tc = new_connection(ip, tcp, flags);	
 	}
-		
-        //tc->tc_dir_packet = (flags & DF_IN) ? DIR_IN : DIR_OUT;
 	tc->tc_csum       = 0;
 
-
-
 	print_packet(ip, tcp, flags, tc);
+
   	int option_len = (tcp->doff-5) << 2;
 	int subtype = -1;	
 	char* buffer = NULL;
 	void *p = NULL;
 	struct tcpopt *toc;
 	
-
-
-	if(option_len>0){
-
-		printf("2.  optionlen: %d ",option_len);
-		printf("Checksum:%x\n",ntohs(tcp->check));
-
-		//u_char* cp = (u_char *)tcp + sizeof(*tcp);
-		
-		printf("3.  OLD TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);	
+	if(option_len>0){	
 		sack_disable(tc,tcp);
 		ws_disable(tc,tcp);
 		toc=find_opt(tcp, TCPOPT_MPTCP);
@@ -1652,14 +1594,8 @@ int handle_packet(void *packet, int len, int flags)
 
 	if (_conf.host_addr.s_addr!=0)
 	{
-
-		
-
 		if (!(flags & DF_IN))
 		{
-	
-
-
 			return DIVERT_MODIFY;
 
 		}
@@ -1667,12 +1603,6 @@ int handle_packet(void *packet, int len, int flags)
 
 	rc=do_output(tc,ip,p,tcp,buffer,subtype);	
 	checksum_packet(tc, ip, tcp);
-
-
-//	print_option(packet,len);
-	printf("New TCP Seq: %x, ACK %x", ntohl(tcp->seq), ntohl(tcp->ack_seq)); 	
-	printf("NEW TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);
-
 	return rc;
 
 }
