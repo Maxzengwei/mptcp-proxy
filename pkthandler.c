@@ -1041,7 +1041,6 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 	printf("\nACK: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == 0){
-		printf(">>>>>>>REMOVE\n");
 		send_add_address(tc, ip, tcp);
 		mptcp_remove(tc, tcp);
 		
@@ -1053,10 +1052,7 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 		tc->initial_connection_client_seq=tc->initial_client_seq;
 		tc->initial_connection_server_seq=tc->initial_server_seq;
 		
-		
-		
 		return DIVERT_MODIFY;
-
 	}
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == -1){
 		tc->tc_state = STATE_PROXY_OFF;
