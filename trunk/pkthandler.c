@@ -1011,7 +1011,7 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
         if(Generate_Random_Key(tc)){
 		 
             struct mp_capable_12 *mp;
-			mp = malloc(sizeof(struct mp_capable_12)); 
+            mp = malloc(sizeof(struct mp_capable_12)); 
 			mp->kind = 30;
 			mp->length = 12;
 			mp->subtype = TYPE_MP_CAPABLE;
