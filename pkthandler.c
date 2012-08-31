@@ -1134,26 +1134,20 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	printf("OLD TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
 	struct mp_dss_44 *mp = (struct mp_dss_44*)p;
 
-
-
-	/*first subflow initial */
+	/*Subflow initial */
 	if(tc->pre_dhead == NULL){ 
 		tc->pre_dhead = malloc(sizeof(struct conn_ctl));
 		tc->pre_dhead->c2s_diff = ntohl(tcp->seq) - ntohl(mp->data_seq);
 		tc->pre_dhead->s2c_diff = ntohl(tcp->ack_seq) - ntohl(mp->data_ack);
-		tc->pre_dhead->p2s_ack = 0; //minimum number 
+		tc->pre_dhead->p2s_ack = 0; 
 		tc->pre_dhead->a_head=malloc(sizeof(struct active_tc));
 		tc->pre_dhead->a_head->a_tc=tc;
 		tc->pre_dhead->a_head->a_next=NULL;	
 		tc->pre_dhead->last_used_tc=tc->pre_dhead->a_head;	
-		
-
-		//tc->p2c_seq = ntohl(tcp->ack_seq);	// TODO each subflow init 
-		//tc->p2c_ack = ntohl(tcp->seq) + ntohs(mp->data_level_len);	//TODO each subflow init
 	}
-
-	tc->p2c_seq = ntohl(tcp->ack_seq);	// TODO each subflow init
+	tc->p2c_seq = ntohl(tcp->ack_seq);	
 	tc->p2c_ack = ntohl(tcp->seq) + ntohs(mp->data_level_len);
+
 	/* record mapping */
 	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
 	dc->c_seq = ntohl(tcp->seq);
@@ -1164,9 +1158,6 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	dc->s_ack = ntohl(mp->data_ack) + tc->pre_dhead->s2c_diff;
 	dc->data_len= ntohs(mp->data_level_len);
 	dc->expected_ack= dc->s_seq + dc->data_len;
-
-//	printf( "*********%x  %x  %x",ntohl(dc->s_seq),ntohs(mp->data_level_len),ntohl(dc->expected_ack));
-
 	dc->tc=tc;
 	
 	/* add to link list */	
@@ -1182,8 +1173,6 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	/* modify the packet */
 	tcp->seq= htonl(dc->s_seq);
 	tcp->ack_seq= htonl(dc->s_ack);
-
-	printf("New TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
 	remove_mp_option(p,buffer);
 
 	if (tc->tc_state==STATE_JOINED){
@@ -1204,14 +1193,10 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 		checksum_packet(tc, ip, tcp);
 		divert_inject(ip, ntohs(ip->ip_len));
 		
-		return DIVERT_DROP;
-		//abort();
-		
+		return DIVERT_DROP;		
 	}
 	
-
-	return DIVERT_MODIFY;
-	
+	return DIVERT_MODIFY;	
 }
 
 int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
@@ -1229,19 +1214,18 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 	mp->subtype = TYPE_MP_DSS;
 	mp->reserved1 = 0;
 	mp->reserved2 = 0;
-	mp->F = 0; //TODO CHECK fin flag
+	mp->F = 0; 
 	mp->m = 0;
 	mp->M = 0;
 	mp->a = 0;
 	mp->A = 1;
 	mp->data_ack = htonl(dc->c_data_seq + dc->data_len);
 	
-	/* modify lenghth */
+	/* modify length */
 	u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 	int option_len = (tcp->doff-5) << 2;
 	ptr+=option_len;
  	memcpy(ptr,mp,mp->length);  
-	printf(" >>>SEND data ACK>>>>>> %x\n",ntohl(mp->data_ack)); 
 
 	if (dc->tc->tc_state==STATE_JOINED)
 	{
@@ -1255,27 +1239,18 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
        		xprintf(XP_ALWAYS, "->%s:%d \n",
                 	inet_ntoa(ip->ip_dst),
                 	ntohs(tcp->dest));
-		
-
 	}	
 
-
 	tcp->doff += 2;
-	ip->ip_len = htons(ntohs(ip->ip_len)+8);
-			
+	ip->ip_len = htons(ntohs(ip->ip_len)+8);			
 	checksum_packet(dc->tc, ip, tcp);
-	
-			
-	
-	divert_inject(ip, ntohs(ip->ip_len));
-	
+	divert_inject(ip, ntohs(ip->ip_len));	
 	free(mp);
 }
 
-/* find packet to ack,  */
+
 int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 	
-
 	printf("=====Data ACK c2s=====\n");
 
 	/* find dc */
@@ -1337,9 +1312,6 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	assert(tc->pre_dhead->last_used_tc!=NULL);
 
 	
-
-
-	
 	/* add new mp dss option */
 	struct mp_dss_44* mp = malloc(sizeof(struct mp_dss_44));
 	mp->kind = 30;
@@ -1360,32 +1332,18 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	usedtc->p2c_seq = usedtc->p2c_seq + dlen;
 	tcp->ack_seq = htonl(usedtc->p2c_ack);
 
-	mp->sub_seq = htonl(ntohl(tcp->seq) - ntohl(usedtc->initial_server_seq)+1); //TODO check
+	mp->sub_seq = htonl(ntohl(tcp->seq) - ntohl(usedtc->initial_server_seq)+1); 
 	mp->data_level_len = htons(dlen);
-	mp->checksum = 0;//TODO checksum
-
-
-
-	printf("Seq %x Ack %x Data Seq %x Data Ack %x\n",ntohl(tcp->seq),ntohl(tcp->ack_seq),ntohl(mp->data_seq),ntohl(mp->data_ack));
-	
-
-	
-
-	
+	mp->checksum = 0;
 
 	if (usedtc->tc_state==STATE_JOINED)
 	{
-
 		ip->ip_dst.s_addr=usedtc->tc_src_ip.s_addr;
 		ip->ip_src.s_addr=_conf.host_addr.s_addr;
 		tcp->dest=usedtc->tc_src_port;
-
-
 	}
 
 	/* modify packet  add mp option*/
-
-	
 	p = (char*)tcp + (tcp->doff<<2);
 	memmove(p + 20,p,dlen);	
 	memcpy(p,mp,mp->length);
@@ -1420,6 +1378,7 @@ int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tc
 		tcp->ack_seq = htonl(tc->pre_dhead->p2s_ack);
 	}
 
+	
 	if (tc->tc_state==STATE_JOINED){
 		
 		ip->ip_dst.s_addr=tc->tc_dst_ip.s_addr;
@@ -1438,8 +1397,6 @@ int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tc
 		checksum_packet(tc, ip, tcp);
 		divert_inject(ip, ntohs(ip->ip_len));
 		
-		
-		//abort();
 		return DIVERT_DROP;
 		
 	}
@@ -1451,14 +1408,8 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 	int rc = DIVERT_ACCEPT;
 	int sport = ntohs(tcp->source);
 	int data_len=tcp_data_len(ip, tcp);
-//	printf("EST: Seq %d Ack %d,subtype %d\n", tcp->seq,tcp->ack_seq,subtype);
 
-	printf("Source Port %d, ack %x, subtype %d\n ",sport,ntohl(tcp->ack_seq), subtype);
-
-
-//TODO need pass buffer in follow method for multi type(e.g. dss_44/dss_88)?
-
-	if (sport==80 && subtype == -1 && data_len>0){ // Data in S -> C (If sport=80, subtype can never = 2 because server has no mptcp option)
+	if (sport==80 && subtype == -1 && data_len>0){ // Data in S -> C 
 		do_output_data_s2c(tc,ip,tcp);
 		rc = DIVERT_MODIFY;
  	}else if(sport!=80  && subtype == 2 && data_len>0){ // Data in C -> S
@@ -1468,8 +1419,7 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		do_output_data_ack_c2s(tc,ip,tcp);
 		rc = DIVERT_DROP;
 	}else if (sport!=80  && subtype == 2 &&  data_len==0){ //Data ACK in S-> C
-		rc=do_output_data_ack_s2c(tc, ip, p, tcp);
-		
+		rc=do_output_data_ack_s2c(tc, ip, p, tcp);	
 	}	
 
 	return rc;
