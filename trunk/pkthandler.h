@@ -116,7 +116,7 @@ struct tc {
 		
 	unsigned long 		initial_client_data_seq;
 	unsigned long		initial_server_data_seq;
-
+	int                     address_advert;
 	
 };
 

@@ -260,6 +260,7 @@ static void tc_init(struct tc *tc)
 	tc->tc_mss_clamp    = 40; /* XXX */
 	tc->tc_sack_disable = 1;
 	tc->tc_rto	    = 100 * 1000;/* XXX */
+	tc->address_advert  = 0;
 	tc->pre_dhead=NULL; // TODO 1. mpjoin 2. free memory 
 	if(atc_head==NULL)
 	{
@@ -290,6 +291,7 @@ static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 	{
 			
 			tc->initial_client_seq=tcp->seq+1;
+		
 			tc->tc_src_ip.s_addr=ip->ip_src.s_addr;
 			tc->tc_src_port=tcp->source;
 			tc->tc_dst_ip.s_addr=ip->ip_dst.s_addr;
@@ -800,12 +802,18 @@ int send_add_address(struct tc *tc, struct ip *ip2,struct tcphdr *tcp2){
                 ip->ip_src.s_addr=ip->ip_dst.s_addr;
                 ip->ip_dst.s_addr=mid;
 
-                
-		//Change Sequence Num
+                if ((tc->p2c_seq==0) || (tc->p2c_ack==0))
+		{//Change Sequence Num
 		mids=tcp->seq;		
 		tcp->seq=tcp->ack_seq;
 		tcp->ack_seq=mids;
-                
+                }
+		else
+		{
+			tcp->seq=tc->p2c_seq;
+			tcp->ack_seq=tc->p2c_ack;
+
+		}
 		
 		struct mp_add_addr_4 *mp;
 		mp=malloc(sizeof(struct mp_add_addr_4));
@@ -909,6 +917,7 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 			tc->pre_dhead=esttc->pre_dhead;
 			tc->tc_dst_ip=esttc->tc_dst_ip;
 			tc->tc_dst_port=esttc->tc_dst_port;
+			printf("Calculate key and SHA");
 			unsigned char randomnum[4];
 			unsigned char randomseq[4];
 		        unsigned char mac[20];
@@ -972,6 +981,8 @@ int do_output_idle(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 			tcp->doff+= 1;
 			ip->ip_len=htons(ntohs(ip->ip_len)+4);
 
+			
+			
 
 			print_option(ip,0);
 			checksum_packet(tc, ip, tcp);
@@ -1008,8 +1019,9 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 	if(tcp->syn == 1 && tcp->ack == 1 && subtype == -1){
 
-		if(Generate_Random_Key(tc)){
-		 
+        	if (Generate_Random_Key(tc))
+		{
+			
 			struct mp_capable_12 *mp;
 			mp = malloc(sizeof(struct mp_capable_12)); 
 			mp->kind = 30;
@@ -1018,12 +1030,17 @@ int do_output_syn_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 			mp->version = 0;   
 			mp->reserved = 0x01;                     
 			memcpy(mp->sender_key,tc->key_b,sizeof(mp->sender_key));
-					
-            		u_char* ptr = (u_char *)tcp + sizeof(*tcp);
+			
+			
+			//struct tcpopt *toc;
+			//toc=tcp_opts_alloc(tc, ip, tcp, TCPOPT_MPTCP);
+			
+  			u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 			int option_len = (tcp->doff-5) << 2;
 			ptr+=option_len;
-            		memcpy(ptr,mp,12);  
+ 			memcpy(ptr,mp,12);  
 	
+
 			tcp->doff += 3;
 			ip->ip_len = htons(ntohs(ip->ip_len)+12);
 			
@@ -1041,7 +1058,8 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 	printf("\nACK: SYN %d ACK %d Subtype %d\n",tcp->syn,tcp->ack,subtype);
 
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == 0){
-		send_add_address(tc, ip, tcp);
+		printf(">>>>>>>REMOVE\n");
+		//send_add_address(tc, ip, tcp);
 		mptcp_remove(tc, tcp);
 		
 		tcp->doff = tcp->doff - 5;
@@ -1052,7 +1070,10 @@ int do_output_synack_sent(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp
 		tc->initial_connection_client_seq=tc->initial_client_seq;
 		tc->initial_connection_server_seq=tc->initial_server_seq;
 		
+		
+		
 		return DIVERT_MODIFY;
+
 	}
 	if(tcp->syn ==0 && tcp->ack == 1 && subtype == -1){
 		tc->tc_state = STATE_PROXY_OFF;
@@ -1134,20 +1155,26 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	printf("OLD TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
 	struct mp_dss_44 *mp = (struct mp_dss_44*)p;
 
-	/*Subflow initial */
+
+
+	/*first subflow initial */
 	if(tc->pre_dhead == NULL){ 
 		tc->pre_dhead = malloc(sizeof(struct conn_ctl));
 		tc->pre_dhead->c2s_diff = ntohl(tcp->seq) - ntohl(mp->data_seq);
 		tc->pre_dhead->s2c_diff = ntohl(tcp->ack_seq) - ntohl(mp->data_ack);
-		tc->pre_dhead->p2s_ack = 0; 
+		tc->pre_dhead->p2s_seq = ntohl(tc->initial_connection_client_seq);
+		tc->pre_dhead->p2s_ack = ntohl(tc->initial_connection_server_seq); //minimum number 
 		tc->pre_dhead->a_head=malloc(sizeof(struct active_tc));
 		tc->pre_dhead->a_head->a_tc=tc;
 		tc->pre_dhead->a_head->a_next=NULL;	
 		tc->pre_dhead->last_used_tc=tc->pre_dhead->a_head;	
+		
+
+		
 	}
+
 	tc->p2c_seq = ntohl(tcp->ack_seq);	
 	tc->p2c_ack = ntohl(tcp->seq) + ntohs(mp->data_level_len);
-
 	/* record mapping */
 	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
 	dc->c_seq = ntohl(tcp->seq);
@@ -1158,6 +1185,10 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	dc->s_ack = ntohl(mp->data_ack) + tc->pre_dhead->s2c_diff;
 	dc->data_len= ntohs(mp->data_level_len);
 	dc->expected_ack= dc->s_seq + dc->data_len;
+	dc->next=NULL;
+
+//	printf( "*********%x  %x  %x",ntohl(dc->s_seq),ntohs(mp->data_level_len),ntohl(dc->expected_ack));
+
 	dc->tc=tc;
 	
 	/* add to link list */	
@@ -1173,6 +1204,10 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 	/* modify the packet */
 	tcp->seq= htonl(dc->s_seq);
 	tcp->ack_seq= htonl(dc->s_ack);
+	tc->pre_dhead->p2s_seq = dc->s_seq;
+	tc->pre_dhead->p2s_ack = dc->s_ack; //minimum number 
+
+	printf("New TCP Seq: %x, Ack: %x\n", ntohl(tcp->seq), ntohl(tcp->ack_seq));
 	remove_mp_option(p,buffer);
 
 	if (tc->tc_state==STATE_JOINED){
@@ -1193,13 +1228,17 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 		checksum_packet(tc, ip, tcp);
 		divert_inject(ip, ntohs(ip->ip_len));
 		
-		return DIVERT_DROP;		
+		return DIVERT_DROP;
+		//abort();
+		
 	}
 	
-	return DIVERT_MODIFY;	
+
+	return DIVERT_MODIFY;
+	
 }
 
-int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
+void send_ack_c2s(struct tc *tc, struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 
 	/* modify packet */
 	tcp->seq = htonl(dc->c_ack);
@@ -1214,18 +1253,44 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 	mp->subtype = TYPE_MP_DSS;
 	mp->reserved1 = 0;
 	mp->reserved2 = 0;
-	mp->F = 0; 
+	mp->F = 0; //TODO CHECK fin flag
 	mp->m = 0;
 	mp->M = 0;
 	mp->a = 0;
 	mp->A = 1;
 	mp->data_ack = htonl(dc->c_data_seq + dc->data_len);
 	
-	/* modify length */
+	/* modify lenghth */
 	u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 	int option_len = (tcp->doff-5) << 2;
 	ptr+=option_len;
  	memcpy(ptr,mp,mp->length);  
+	printf(" >>>SEND data ACK>>>>>> %x\n",ntohl(mp->data_ack)); 
+
+	if ( (tc->tc_state==STATE_INITEST) && (tc->address_advert==0) && (_conf.host_addr.s_addr!=0))
+	{
+
+		
+		struct mp_add_addr_4 *mpa;
+		mpa=malloc(sizeof(struct mp_add_addr_4));
+		
+		mpa->kind=30;
+		mpa->length=8;
+		mpa->subtype=3;
+		mpa->ipver=4;
+		mpa->address=1;
+		mpa->ipv4=_conf.host_addr.s_addr; 
+		
+		ptr+=8;
+		memcpy(ptr, mpa, 8);  
+		
+		printf("\nold tcp %d--", tcp->doff);
+		tcp->doff = tcp->doff+2;
+		ip->ip_len = htons(ntohs(ip->ip_len)+8);
+		tc->address_advert=1;
+		free(mpa);
+
+	}
 
 	if (dc->tc->tc_state==STATE_JOINED)
 	{
@@ -1239,53 +1304,91 @@ int send_ack_c2s(struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
        		xprintf(XP_ALWAYS, "->%s:%d \n",
                 	inet_ntoa(ip->ip_dst),
                 	ntohs(tcp->dest));
+		
+
 	}	
 
+
 	tcp->doff += 2;
-	ip->ip_len = htons(ntohs(ip->ip_len)+8);			
+	ip->ip_len = htons(ntohs(ip->ip_len)+8);
+			
 	checksum_packet(dc->tc, ip, tcp);
-	divert_inject(ip, ntohs(ip->ip_len));	
+	divert_inject(ip, ntohs(ip->ip_len));
+	
+	
+	
 	free(mp);
+	
 }
 
-
+/* find packet to ack,  */
 int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 	
-	printf("=====Data ACK c2s=====\n");
 
+	printf("=====Data ACK c2s=====\n");
+	assert(tc->pre_dhead!=NULL);
+	
+
+	
+	if(tc->pre_dhead->next == NULL){
+		printf("ERROR: cant find the packet to ack");
+		return DIVERT_DROP;
+	}
+	assert(tc->pre_dhead->next!=NULL);
 	/* find dc */
 	struct data_ctl *dc = tc->pre_dhead->next;
 	
-	if(dc == NULL){
-		printf("ERROR: cant find the packet to ack");
-		return 0;
-	}
-
+	assert(dc!=NULL);
 	printf("S_ACK: %x\n", ntohl(tcp->ack_seq));
 
 	struct data_ctl *previous = dc;
-	while(dc){
-	printf("S_expexted: %x\n", dc->expected_ack);
-		if(dc->expected_ack <= ntohl(tcp->ack_seq)){
-			send_ack_c2s(ip,tcp,dc); // send ack 
-		
+	while(dc)
+	{
+		struct data_ctl *f;
+		printf("S_expexted: %x\n", dc->expected_ack);
+		assert(dc!=NULL);
+		if(dc->expected_ack <= ntohl(tcp->ack_seq))
+		{
+			send_ack_c2s(tc, ip, tcp, dc); // send ack 
+			
+			assert(previous!=NULL);
+			assert(tc->pre_dhead->next!=NULL);
+
 			/* delete record */
 			if(previous == tc->pre_dhead->next){ //first record
+				
 				tc->pre_dhead->next = dc->next;
 				previous = dc->next;
-				free(dc);
+				f=dc;;
 				dc = previous;
+				
 			}
 			else{
+				
 				previous->next = dc->next;
-				free(dc);
+				f=dc;
 				dc = previous->next;
+				
 			}
-		}else{
+				
+				free(f); 	// Too many divert inject may crash the system, Still Debugging
+				continue;
+				
+		}
+		else
+		{
+
+			
 			previous = dc;
 			dc = dc->next;
+			
 		}
+
+		
+		
 	}
+
+	return DIVERT_DROP;
 }
 
 
@@ -1312,6 +1415,9 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	assert(tc->pre_dhead->last_used_tc!=NULL);
 
 	
+
+
+	
 	/* add new mp dss option */
 	struct mp_dss_44* mp = malloc(sizeof(struct mp_dss_44));
 	mp->kind = 30;
@@ -1327,23 +1433,60 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 	mp->data_ack = htonl(ntohl(tcp->ack_seq) - tc->pre_dhead->c2s_diff);
 	mp->data_seq = htonl(ntohl(tcp->seq) - tc->pre_dhead->s2c_diff);
 
-	/* update value */
+	
 	tcp->seq = htonl(usedtc->p2c_seq);		// Order Changed for Multiple Subflow usage;
 	usedtc->p2c_seq = usedtc->p2c_seq + dlen;
 	tcp->ack_seq = htonl(usedtc->p2c_ack);
 
 	mp->sub_seq = htonl(ntohl(tcp->seq) - ntohl(usedtc->initial_server_seq)+1); 
 	mp->data_level_len = htons(dlen);
-	mp->checksum = 0;
+	mp->checksum = 0;//TODO checksum
+
+
+
+	printf("Seq %x Ack %x Data Seq %x Data Ack %x\n",ntohl(tcp->seq),ntohl(tcp->ack_seq),ntohl(mp->data_seq),ntohl(mp->data_ack));
+	
+/*
+	//record the packet
+	struct data_ctl *dc = malloc(sizeof(struct data_ctl));
+	dc->c_seq = ntohl(tc->p_seq);
+	dc->c_ack = ntohl(tc->c_seq);
+	dc->c_data_ack = ntohl(mp->data_ack);
+	dc->c_data_seq = ntohl(mp->data_seq);
+	dc->s_seq = ntohl(tcp->seq);
+	dc->s_ack = ntohl(tcp->ack_seq);
+	dc->data_len=dlen;
+	dc->expected_ack=dc->s_seq+dc->data_len;
+	dc->tc=tc;
+	
+	/* add to link list 
+	if (tc->pre_dhead->next==NULL){
+		tc->pre_dhead->next = dc;
+	}
+	else
+	{
+		dc->next=tc->pre_dhead->next;
+		tc->pre_dhead->next=dc;
+	}
+*/
+	
+	
+
+	
 
 	if (usedtc->tc_state==STATE_JOINED)
 	{
+
 		ip->ip_dst.s_addr=usedtc->tc_src_ip.s_addr;
 		ip->ip_src.s_addr=_conf.host_addr.s_addr;
 		tcp->dest=usedtc->tc_src_port;
+
+
 	}
 
 	/* modify packet  add mp option*/
+
+	
 	p = (char*)tcp + (tcp->doff<<2);
 	memmove(p + 20,p,dlen);	
 	memcpy(p,mp,mp->length);
@@ -1358,18 +1501,23 @@ int do_output_data_s2c(struct tc *tc,struct ip  *ip,struct tcphdr *tcp){
 
 int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp){
 	printf("=====Data ACK s2c=====\n");
+
+	if (tcp->ack_seq==tc->initial_server_seq)
+		return DIVERT_DROP;
+
 	struct mp_dss_44_ack *mp = (struct mp_dss_44_ack*)p;
 	assert(p!=NULL);
 
-	/*update value*/
+	
 	if (tc->pre_dhead==NULL)
 		return DIVERT_DROP;
 	else
-	{
+	{	assert(tc->pre_dhead!=NULL);
 		uint32_t current = ntohl(mp->data_ack) + tc->pre_dhead->s2c_diff;
 		if(current>tc->pre_dhead->p2s_ack){
 			tc->pre_dhead->p2s_ack = current;
 		}
+		/*update value*/
 		tc->p2c_ack = ntohl(tcp->seq);
 
 		/* modify packet */
@@ -1378,7 +1526,6 @@ int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tc
 		tcp->ack_seq = htonl(tc->pre_dhead->p2s_ack);
 	}
 
-	
 	if (tc->tc_state==STATE_JOINED){
 		
 		ip->ip_dst.s_addr=tc->tc_dst_ip.s_addr;
@@ -1397,6 +1544,8 @@ int do_output_data_ack_s2c(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tc
 		checksum_packet(tc, ip, tcp);
 		divert_inject(ip, ntohs(ip->ip_len));
 		
+		
+		//abort();
 		return DIVERT_DROP;
 		
 	}
@@ -1408,8 +1557,14 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 	int rc = DIVERT_ACCEPT;
 	int sport = ntohs(tcp->source);
 	int data_len=tcp_data_len(ip, tcp);
+//	printf("EST: Seq %d Ack %d,subtype %d\n", tcp->seq,tcp->ack_seq,subtype);
 
-	if (sport==80 && subtype == -1 && data_len>0){ // Data in S -> C 
+	printf("Source Port %d, ack %x, subtype %d\n ",sport,ntohl(tcp->ack_seq), subtype);
+
+
+//TODO need pass buffer in follow method for multi type(e.g. dss_44/dss_88)?
+
+	if (sport==80 && subtype == -1 && data_len>0){ // Data in S -> C (If sport=80, subtype can never = 2 because server has no mptcp option)
 		do_output_data_s2c(tc,ip,tcp);
 		rc = DIVERT_MODIFY;
  	}else if(sport!=80  && subtype == 2 && data_len>0){ // Data in C -> S
@@ -1419,7 +1574,8 @@ int do_output_data(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *
 		do_output_data_ack_c2s(tc,ip,tcp);
 		rc = DIVERT_DROP;
 	}else if (sport!=80  && subtype == 2 &&  data_len==0){ //Data ACK in S-> C
-		rc=do_output_data_ack_s2c(tc, ip, p, tcp);	
+		rc=do_output_data_ack_s2c(tc, ip, p, tcp);
+		
 	}	
 
 	return rc;
@@ -1446,22 +1602,28 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 		rc = do_output_sub_synack_sent(tc,ip,p,tcp,buffer,subtype);
 		break;
 
+
 	case(STATE_PROXY_OFF):
 		rc = DIVERT_ACCEPT;
 		break;
 	
+
 	case(STATE_INITEST):
+
 		if ((subtype!=-1)&&(subtype!=2))
 		{
+			
 	  		return DIVERT_ACCEPT;
 		}	
 			
 		rc = do_output_data(tc,ip,p,tcp,buffer,subtype);
-		break;
+			break;
 
 	case(STATE_JOINED):
+
 		if ((subtype!=-1)&&(subtype!=2))
-		{			
+		{
+			
 	  		return DIVERT_ACCEPT;
 		}
 		rc = do_output_data(tc,ip,p,tcp,buffer,subtype);
@@ -1472,21 +1634,27 @@ int do_output(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,char *buffe
 		break;
 	}
 
-	free(buffer);	
+	free(buffer);
+	
 	return rc;
 }
 
 int handle_packet(void *packet, int len, int flags)
-{      
+{
+
+        
 	struct ip *ip = packet;
         struct tc *tc;
 	struct tcphdr *tcp;
-	int rc=DIVERT_MODIFY;
 
+	int rc=DIVERT_MODIFY;
 	if (ntohs(ip->ip_len) != len)
-		{        
+		{
+                       
 			xprintf(XP_ALWAYS, "Bad packet\n");
 			return DIVERT_ACCEPT; /* kernel will drop / deal with it */
+
+
 		}
 
 	if (ip->ip_p != IPPROTO_TCP)
@@ -1501,23 +1669,42 @@ int handle_packet(void *packet, int len, int flags)
 			return DIVERT_ACCEPT; /* kernel will drop / deal with it */
 
 		}
-
         tc = lookup_connection(ip, tcp, flags);
         /* new connection */
 	if (!tc) {
-		tc = new_connection(ip, tcp, flags);	
+		/*if (tcp->th_flags != TH_SYN) {
+			xprintf(XP_NOISY, "Ignoring established connection: ");
+			print_packet(ip, tcp, flags);
+
+			return DIVERT_ACCEPT;
+		}*/
+
+		tc = new_connection(ip, tcp, flags);
+		
 	}
+		
+        //tc->tc_dir_packet = (flags & DF_IN) ? DIR_IN : DIR_OUT;
 	tc->tc_csum       = 0;
 
-	print_packet(ip, tcp, flags, tc);
 
+
+	print_packet(ip, tcp, flags, tc);
   	int option_len = (tcp->doff-5) << 2;
 	int subtype = -1;	
 	char* buffer = NULL;
 	void *p = NULL;
 	struct tcpopt *toc;
 	
-	if(option_len>0){	
+
+
+	if(option_len>0){
+
+		printf("2.  optionlen: %d ",option_len);
+		printf("Checksum:%x\n",ntohs(tcp->check));
+
+		//u_char* cp = (u_char *)tcp + sizeof(*tcp);
+		
+		printf("3.  OLD TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);	
 		sack_disable(tc,tcp);
 		ws_disable(tc,tcp);
 		toc=find_opt(tcp, TCPOPT_MPTCP);
@@ -1534,8 +1721,14 @@ int handle_packet(void *packet, int len, int flags)
 
 	if (_conf.host_addr.s_addr!=0)
 	{
+
+		
+
 		if (!(flags & DF_IN))
 		{
+	
+
+
 			return DIVERT_MODIFY;
 
 		}
@@ -1543,6 +1736,12 @@ int handle_packet(void *packet, int len, int flags)
 
 	rc=do_output(tc,ip,p,tcp,buffer,subtype);	
 	checksum_packet(tc, ip, tcp);
+
+
+//	print_option(packet,len);
+	printf("New TCP Seq: %x, ACK %x", ntohl(tcp->seq), ntohl(tcp->ack_seq)); 	
+	printf("NEW TCP Header Length: %d, Option length %d\n", tcp->doff << 2, (tcp->doff-5) << 2);
+
 	return rc;
 
 }
