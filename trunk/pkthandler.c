@@ -1287,7 +1287,7 @@ void send_ack_c2s(struct tc *tc, struct ip *ip,struct tcphdr *tcp,struct data_ct
 		
 		p = (char*)tcp + (tcp->doff<<2);
 		memmove(p + 8,p,8);	
-		memcpy(p,mp,8);
+		memcpy(p,mpa,8);
 		tcp->doff += 2;
 		ip->ip_len = htons(ntohs(ip->ip_len)+8); 
 		
