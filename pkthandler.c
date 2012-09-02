@@ -1,3 +1,4 @@
+/* Reused from tcpcrypt code */
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdlib.h>
@@ -34,8 +35,9 @@
 
 
 
-
-
+/** Reuse of TCPcrypt code
+  *	
+  */
 struct conn {
 	struct sockaddr_in	c_addr[2];
 	struct tc		*c_tc;
@@ -251,6 +253,7 @@ static void sockopt_clear(unsigned short port)
 	_sockopts[port] = NULL;
 }
 
+// Part of this method is implemented by ourselves
 static void tc_init(struct tc *tc)
 {
 	memset(tc, 0, sizeof(*tc));
@@ -282,7 +285,7 @@ static void tc_init(struct tc *tc)
 	}	
 }
 
-
+// The tc_seq_init method is implemented by ourselves
 static void tc_seq_init(struct tc *tc, struct ip *ip, struct tcphdr *tcp)
 {
 	
@@ -478,44 +481,6 @@ static struct tc *sockopt_get(struct tc_ctl *ctl)
 	return tc;
 }
 
-
-
-int print_option(void *packet, int len)
-{
-	
-	struct ip *ip = packet;
-        struct tc *tc;
-	struct tcphdr *tcp;
-
-	tcp = (struct tcphdr*) ((unsigned long) ip + (ip->ip_hl << 2));	
-	u_char* cp = (u_char *)tcp + sizeof(*tcp);
- 
-	int option_len = (tcp->doff-5) << 2;
-	
-	printf("NEW option "); 
-	while(--option_len>=0){
-
-
-		printf("%02x ",*cp++);
-	}
-	printf("\n");
-}
-
-static void set_ip_len(struct ip *ip, unsigned short len)
-{
-	unsigned short old = ntohs(ip->ip_len);
-	int diff;
-	int sum;
-
-	ip->ip_len = htons(len);
-
-	diff	   = len - old;
-	sum  	   = ntohs(~ip->ip_sum);
-	sum 	  += diff;
-	sum	   = (sum >> 16) + (sum & 0xffff);
-	sum	  += (sum >> 16);
-	ip->ip_sum = htons(~sum);
-}
 static void *tcp_data(struct tcphdr *tcp)
 {
 	return (char*) tcp + (tcp->doff << 2);
@@ -527,6 +492,10 @@ static int tcp_data_len(struct ip *ip, struct tcphdr *tcp)
 
 	return ntohs(ip->ip_len) - hl;
 }
+
+
+
+
 
 static void *find_opt(struct tcphdr *tcp, unsigned char opt)
 {
@@ -623,6 +592,32 @@ static int ws_disable(struct tc *tc, struct tcphdr *tcp)
 	memset(ws, TCPOPT_NOP, ws->len);
 
 	return DIVERT_MODIFY;
+}
+// ---------------------------------------Reuse of Tcpcrypt code in this file ends here------------------------------------
+// ------------------------------------------------------------------------------------------------------------------------
+// 
+// ------Code starts from here are our own implementation (except from part of the code in handle_packet()) ---------------
+
+
+int print_option(void *packet, int len)
+{
+	
+	struct ip *ip = packet;
+        struct tc *tc;
+	struct tcphdr *tcp;
+
+	tcp = (struct tcphdr*) ((unsigned long) ip + (ip->ip_hl << 2));	
+	u_char* cp = (u_char *)tcp + sizeof(*tcp);
+ 
+	int option_len = (tcp->doff-5) << 2;
+	
+	printf("NEW option "); 
+	while(--option_len>=0){
+
+
+		printf("%02x ",*cp++);
+	}
+	printf("\n");
 }
 
 static struct tc *find_esttc(struct tc *tc)
@@ -1240,6 +1235,7 @@ int do_output_data_c2s(struct tc *tc,struct ip *ip,void *p,struct tcphdr *tcp,ch
 
 void send_ack_c2s(struct tc *tc, struct ip *ip,struct tcphdr *tcp,struct data_ctl* dc){
 
+	char *p;
 	/* modify packet */
 	tcp->seq = htonl(dc->c_ack);
 	tcp->ack_seq = htonl(dc->c_seq + dc->data_len);
@@ -1261,11 +1257,19 @@ void send_ack_c2s(struct tc *tc, struct ip *ip,struct tcphdr *tcp,struct data_ct
 	mp->data_ack = htonl(dc->c_data_seq + dc->data_len);
 	
 	/* modify lenghth */
-	u_char* ptr = (u_char *)tcp + sizeof(*tcp);
+	/*u_char* ptr = (u_char *)tcp + sizeof(*tcp);
 	int option_len = (tcp->doff-5) << 2;
 	ptr+=option_len;
- 	memcpy(ptr,mp,mp->length);  
+ 	memcpy(ptr,mp,mp->length);*/
+
+	p = (char*)tcp + (tcp->doff<<2);
+	memmove(p + 8,p,8);	
+	memcpy(p,mp,8);
+	tcp->doff += 2;
+	ip->ip_len = htons(ntohs(ip->ip_len)+8);
+  
 	printf(" >>>SEND data ACK>>>>>> %x\n",ntohl(mp->data_ack)); 
+
 
 	if ( (tc->tc_state==STATE_INITEST) && (tc->address_advert==0) && (_conf.host_addr.s_addr!=0))
 	{
@@ -1281,12 +1285,14 @@ void send_ack_c2s(struct tc *tc, struct ip *ip,struct tcphdr *tcp,struct data_ct
 		mpa->address=1;
 		mpa->ipv4=_conf.host_addr.s_addr; 
 		
-		ptr+=8;
-		memcpy(ptr, mpa, 8);  
+		p = (char*)tcp + (tcp->doff<<2);
+		memmove(p + 8,p,8);	
+		memcpy(p,mp,8);
+		tcp->doff += 2;
+		ip->ip_len = htons(ntohs(ip->ip_len)+8); 
 		
 		printf("\nold tcp %d--", tcp->doff);
-		tcp->doff = tcp->doff+2;
-		ip->ip_len = htons(ntohs(ip->ip_len)+8);
+
 		tc->address_advert=1;
 		free(mpa);
 
@@ -1298,27 +1304,19 @@ void send_ack_c2s(struct tc *tc, struct ip *ip,struct tcphdr *tcp,struct data_ct
 		ip->ip_dst.s_addr=dc->tc->tc_src_ip.s_addr;
 		ip->ip_src.s_addr=_conf.host_addr.s_addr;
 		tcp->dest=dc->tc->tc_src_port;
-		xprintf(XP_ALWAYS, "\n\n1.   %s:%d",
-                	inet_ntoa(ip->ip_src),
-                	ntohs(tcp->source));
-       		xprintf(XP_ALWAYS, "->%s:%d \n",
-                	inet_ntoa(ip->ip_dst),
-                	ntohs(tcp->dest));
-		
+	
 
 	}	
 
 
-	tcp->doff += 2;
-	ip->ip_len = htons(ntohs(ip->ip_len)+8);
+	
 			
 	checksum_packet(dc->tc, ip, tcp);
 	divert_inject(ip, ntohs(ip->ip_len));
 	
 	
-	
 	free(mp);
-	
+
 }
 
 /* find packet to ack,  */
@@ -1326,6 +1324,12 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 	
 
 	printf("=====Data ACK c2s=====\n");
+	if(tc->pre_dhead == NULL)
+	{
+		return DIVERT_DROP;
+
+	}
+
 	assert(tc->pre_dhead!=NULL);
 	
 
@@ -1344,6 +1348,8 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 	struct data_ctl *previous = dc;
 	while(dc)
 	{
+
+		
 		struct data_ctl *f;
 		printf("S_expexted: %x\n", dc->expected_ack);
 		assert(dc!=NULL);
@@ -1353,37 +1359,42 @@ int do_output_data_ack_c2s(struct tc *tc,struct ip *ip,struct tcphdr *tcp){
 			
 			assert(previous!=NULL);
 			assert(tc->pre_dhead->next!=NULL);
-
+			
 			/* delete record */
-			if(previous == tc->pre_dhead->next){ //first record
+			if(dc == tc->pre_dhead->next){ //first record
 				
 				tc->pre_dhead->next = dc->next;
 				previous = dc->next;
-				f=dc;;
-				dc = previous;
+				f=dc;
+				dc = tc->pre_dhead->next;
 				
 			}
 			else{
-				
-				previous->next = dc->next;
 				f=dc;
-				dc = previous->next;
+				previous->next = dc->next;
+				dc=dc->next;
+				
 				
 			}
 				
 				free(f); 	// Too many divert inject may crash the system, Still Debugging
+				
+				
 				continue;
 				
 		}
 		else
 		{
 
-			
+			if ((previous->next==NULL) || (dc->next==NULL))
+				break;
 			previous = dc;
 			dc = dc->next;
 			
+			
+			
 		}
-
+		
 		
 		
 	}

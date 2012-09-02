@@ -1,3 +1,6 @@
+/* Part of code is Reused from tcpcrypt code */
+
+
 #include <sys/types.h> 
 #include <stdio.h>
 #include <stdlib.h>

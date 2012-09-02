@@ -1,3 +1,5 @@
+/* Part of code is Reused from tcpcrypt code */
+
 #include "inc.h"
 #define MAX_NONCE	16
 #define MAX_SS		32
@@ -95,6 +97,7 @@ struct tc {
 	struct conn		*tc_conn;
 	int			tc_app_support;
 
+        // Our implementation of this struct starts here
 	unsigned char		key_a[8]; 
 	unsigned char		key_b[8]; 
 	
@@ -107,7 +110,7 @@ struct tc {
 	uint32_t		p2c_seq;
 	uint32_t		p2c_ack;	
 
-	/* unused, for checking first data packet */
+	
 	uint32_t 		initial_server_seq;
 	uint32_t		initial_client_seq;
 
@@ -120,7 +123,7 @@ struct tc {
 	
 };
 
-
+// Our own data structure starts here
 struct tc_ctl {
 	uint32_t	tcc_seq;
 	struct in_addr	tcc_src;

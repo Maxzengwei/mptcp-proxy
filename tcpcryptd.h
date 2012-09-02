@@ -1,3 +1,5 @@
+/* Reused from tcpcrypt code */
+
 #include "inc.h"
 
 
