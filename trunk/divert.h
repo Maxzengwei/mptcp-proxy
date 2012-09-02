@@ -1,3 +1,5 @@
+/* Reused from tcpcrypt code */
+
 #ifndef __TCPCRYPT_DIVERT_H__
 #define __TCPCRYPT_DIVERT_H__
 
